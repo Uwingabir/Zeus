@@ -1,12 +1,32 @@
 /**
  * ZEUS User Interface Module
- * High-performance UI renderers, tables, dashboard widgets, and interactive modals.
+ * High-performance UI renderers, tables, interactive analytics charts, and modals.
  */
 
 const UI = {
   activeView: 'dashboard',
   searchQueries: {},
-  filterStates: {},
+  filterStates: {
+    projectsStage: 'All',
+    clientsStatus: 'All',
+    internshipsStatus: 'All'
+  },
+  dashboardChartInstance: null,
+
+  // Keypad Helper Functions for Security PIN Pad
+  keypadPress(digit) {
+    const input = document.getElementById('security-pin-input');
+    if (input && input.value.length < 8) {
+      input.value += digit;
+    }
+  },
+
+  keypadClear() {
+    const input = document.getElementById('security-pin-input');
+    if (input) {
+      input.value = '';
+    }
+  },
 
   // Toast Notification System
   showToast(message, type = 'success') {
@@ -28,7 +48,7 @@ const UI = {
     };
 
     const toast = document.createElement('div');
-    toast.className = `flex items-center gap-3 px-4 py-3 rounded-xl border shadow-xl backdrop-blur-md text-sm toast-enter pointer-events-auto max-w-md ${colors[type] || colors.info}`;
+    toast.className = `flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-xl backdrop-blur-md text-sm toast-enter pointer-events-auto max-w-md ${colors[type] || colors.info}`;
     toast.innerHTML = `
       ${icons[type] || icons.info}
       <span class="font-medium text-slate-200">${message}</span>
@@ -103,7 +123,7 @@ const UI = {
       }
       if (pinInput) {
         pinInput.classList.add('border-rose-500', 'shake');
-        setTimeout(() => pinInput.classList.remove('border-rose-500', 'shake'), 1000);
+        setTimeout(() => pinInput.classList.remove('border-rose-500', 'shake'), 800);
       }
     }
   },
@@ -116,15 +136,15 @@ const UI = {
     const unlocked = Security.isUnlocked();
     if (unlocked) {
       badge.innerHTML = `
-        <button onclick="Security.lock(); UI.render();" class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors" title="Click to Lock Vault">
-          <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
-          <span>Vault Unlocked</span>
-          <i data-lucide="lock" class="w-3 h-3 ml-1 opacity-70"></i>
+        <button onclick="Security.lock(); UI.render();" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all shadow-sm" title="Click to Lock Vault">
+          <span class="status-dot status-dot-emerald"></span>
+          <span>Vault Cleared</span>
+          <i data-lucide="lock" class="w-3.5 h-3.5 ml-1 opacity-70"></i>
         </button>
       `;
     } else {
       badge.innerHTML = `
-        <button onclick="Security.challenge('credentials', () => UI.render());" class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors" title="Security restricted">
+        <button onclick="Security.challenge('credentials', () => UI.render());" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all shadow-sm" title="Security restricted: click to unlock">
           <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
           <span>Vault Locked</span>
         </button>
@@ -135,7 +155,6 @@ const UI = {
 
   // Switch Active View
   navigate(viewName) {
-    // If navigation targets a security-restricted view, check clearance
     if (viewName === 'past-employees' || viewName === 'credentials') {
       if (!Security.isUnlocked()) {
         Security.challenge(viewName, () => {
@@ -172,6 +191,10 @@ const UI = {
     this.renderHeaderSecurityIndicator();
     this.renderContent();
     lucide.createIcons();
+
+    if (this.activeView === 'dashboard') {
+      this.initDashboardCharts();
+    }
   },
 
   // 1. LOGIN FORM RENDERER
@@ -180,7 +203,7 @@ const UI = {
     const domainsText = allowed.filter(d => !d.includes('.')).map(d => '@' + d).join(', ');
     const hintEl = document.getElementById('allowed-domains-hint');
     if (hintEl) {
-      hintEl.textContent = `Authorized company accounts: ${domainsText}`;
+      hintEl.textContent = `Authorized: ${domainsText}`;
     }
   },
 
@@ -230,7 +253,7 @@ const UI = {
           onclick="UI.navigate('${item.id}')"
           class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
             active 
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' 
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 ring-1 ring-white/10' 
               : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
           }">
           <div class="flex items-center gap-3">
@@ -365,14 +388,7 @@ const UI = {
   },
 
   // ==========================================
-  // DASHBOARD VIEW (Fulfills exact PDF spec!)
-  // - stats
-  // - products and stages
-  // - clients
-  // - applications
-  // - important documents
-  // - employee we worked with (security restriction)
-  // - credentials (security restriction)
+  // DASHBOARD VIEW (All 7 required sections + Charts)
   // ==========================================
   renderDashboardView() {
     const projects = Store.getProjects();
@@ -389,73 +405,112 @@ const UI = {
       <div class="space-y-8 animate-fade-in pb-12">
         <!-- 1. STATS ROW -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm hover:border-slate-700 transition-all">
+          <div class="p-5 rounded-3xl card-premium">
             <div class="flex items-center justify-between mb-3">
               <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Projects</span>
-              <div class="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+              <div class="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-400">
                 <i data-lucide="folder-kanban" class="w-5 h-5"></i>
               </div>
             </div>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-extrabold text-white">${projects.length}</span>
-              <span class="text-xs font-semibold text-emerald-400 flex items-center">
-                <i data-lucide="trending-up" class="w-3.5 h-3.5 mr-0.5"></i> +2 new
+              <span class="text-xs font-semibold text-emerald-400 flex items-center bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                <i data-lucide="trending-up" class="w-3.5 h-3.5 mr-0.5"></i> +18% MoM
               </span>
             </div>
-            <p class="text-xs text-slate-500 mt-2">Across Domari, Ikirezi & FraudShield</p>
+            <p class="text-xs text-slate-400 mt-2.5">Across Domari, Ikirezi & FraudShield</p>
           </div>
 
-          <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm hover:border-slate-700 transition-all">
+          <div class="p-5 rounded-3xl card-premium">
             <div class="flex items-center justify-between mb-3">
               <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Enterprise Clients</span>
-              <div class="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+              <div class="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-400">
                 <i data-lucide="building-2" class="w-5 h-5"></i>
               </div>
             </div>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-extrabold text-white">${clients.length}</span>
-              <span class="text-xs font-semibold text-emerald-400 flex items-center">
-                <i data-lucide="check" class="w-3.5 h-3.5 mr-0.5"></i> 100% active
+              <span class="text-xs font-semibold text-emerald-400 flex items-center bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                <span class="status-dot status-dot-emerald mr-1.5"></span> 100% Active
               </span>
             </div>
-            <p class="text-xs text-slate-500 mt-2">Banking, Telco & Energy leaders</p>
+            <p class="text-xs text-slate-400 mt-2.5">Tier 1 Banking, Telco & Energy</p>
           </div>
 
-          <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm hover:border-slate-700 transition-all">
+          <div class="p-5 rounded-3xl card-premium">
             <div class="flex items-center justify-between mb-3">
               <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Team & Interns</span>
-              <div class="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+              <div class="p-2.5 rounded-2xl bg-purple-500/10 text-purple-400">
                 <i data-lucide="users" class="w-5 h-5"></i>
               </div>
             </div>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-extrabold text-white">${employees.length + internships.filter(i => i.status === 'Accepted').length}</span>
-              <span class="text-xs font-semibold text-indigo-400">
+              <span class="text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
                 ${employees.length} core • ${internships.length} pipeline
               </span>
             </div>
-            <p class="text-xs text-slate-500 mt-2">Full-stack, ML & DevOps</p>
+            <p class="text-xs text-slate-400 mt-2.5">Engineering, ML & Architecture</p>
           </div>
 
-          <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm hover:border-slate-700 transition-all">
+          <div class="p-5 rounded-3xl card-premium">
             <div class="flex items-center justify-between mb-3">
               <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Security Vault</span>
-              <div class="p-2 rounded-xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
+              <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
                 <i data-lucide="${isUnlocked ? 'shield-check' : 'shield-alert'}" class="w-5 h-5"></i>
               </div>
             </div>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-extrabold text-white">${credentials.length}</span>
-              <span class="text-xs font-semibold ${isUnlocked ? 'text-emerald-400' : 'text-amber-400'}">
-                ${isUnlocked ? 'Cleared (Active)' : 'Clearance Required'}
+              <span class="text-xs font-semibold ${isUnlocked ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'} px-2 py-0.5 rounded-md border ${isUnlocked ? 'border-emerald-500/20' : 'border-amber-500/20'}">
+                ${isUnlocked ? 'Vault Cleared' : 'PIN Protected'}
               </span>
             </div>
-            <p class="text-xs text-slate-500 mt-2">PIN & biometric-gated secrets</p>
+            <p class="text-xs text-slate-400 mt-2.5">KMS, Database & Root keys</p>
+          </div>
+        </div>
+
+        <!-- INTERACTIVE ANALYTICS ROW -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 p-6 rounded-3xl card-premium">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                  <i data-lucide="line-chart" class="w-4 h-4 text-indigo-400"></i>
+                  Portfolio Delivery & Financial Trajectory
+                </h3>
+                <p class="text-xs text-slate-400 mt-0.5">Contract values and delivery velocity across quarters</p>
+              </div>
+              <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                Total Value: $1.43M
+              </span>
+            </div>
+            <div class="h-64 w-full">
+              <canvas id="dashboard-trend-chart"></canvas>
+            </div>
+          </div>
+
+          <div class="p-6 rounded-3xl card-premium flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                  <i data-lucide="pie-chart" class="w-4 h-4 text-purple-400"></i>
+                  Pipeline Stage Breakdown
+                </h3>
+              </div>
+              <div class="h-48 w-full flex items-center justify-center">
+                <canvas id="dashboard-pie-chart"></canvas>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs text-slate-400 pt-3 border-t border-slate-800">
+              <div><strong class="text-white">4</strong> In Production</div>
+              <div><strong class="text-white">5</strong> Under Review</div>
+            </div>
           </div>
         </div>
 
         <!-- 2. PRODUCTS AND STAGES -->
-        <div class="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
+        <div class="p-6 rounded-3xl card-premium">
           <div class="flex items-center justify-between mb-6">
             <div>
               <h3 class="text-lg font-bold text-white flex items-center gap-2">
@@ -471,9 +526,8 @@ const UI = {
 
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             ${products.map(product => {
-              const stages = ['Ideation', 'Planning', 'Development', 'QA & Testing', 'Live Production'];
               return `
-                <div class="p-4 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between">
+                <div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between">
                   <div>
                     <div class="flex items-start justify-between gap-2 mb-2">
                       <h4 class="font-bold text-sm text-slate-100">${product.name}</h4>
@@ -484,14 +538,17 @@ const UI = {
 
                   <div>
                     <div class="flex items-center justify-between text-xs mb-1.5">
-                      <span class="font-medium text-indigo-400">${product.stage}</span>
+                      <span class="font-medium text-indigo-400 flex items-center gap-1.5">
+                        <span class="status-dot status-dot-indigo"></span>
+                        ${product.stage}
+                      </span>
                       <span class="text-slate-400 font-mono">${product.progress}%</span>
                     </div>
                     <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                      <div class="bg-indigo-500 h-1.5 rounded-full transition-width" style="width: ${product.progress}%"></div>
+                      <div class="bg-gradient-to-r from-indigo-500 to-indigo-400 h-1.5 rounded-full transition-width" style="width: ${product.progress}%"></div>
                     </div>
 
-                    <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400">
+                    <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-[11px] text-slate-400">
                       <span>Lead: <strong class="text-slate-300">${product.lead}</strong></span>
                       <span class="text-slate-500">${product.category}</span>
                     </div>
@@ -505,7 +562,7 @@ const UI = {
         <!-- 3. SPLIT ROW: RECENT CLIENTS & APPLICATIONS -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <!-- Clients Card -->
-          <div class="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm flex flex-col justify-between">
+          <div class="p-6 rounded-3xl card-premium flex flex-col justify-between">
             <div>
               <div class="flex items-center justify-between mb-4">
                 <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -519,7 +576,7 @@ const UI = {
 
               <div class="space-y-3">
                 ${clients.slice(0, 4).map(client => `
-                  <div class="p-3 rounded-xl bg-slate-800/40 border border-slate-800 flex items-center justify-between hover:bg-slate-800/70 transition-colors">
+                  <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between hover:bg-slate-800/60 transition-colors">
                     <div>
                       <h4 class="text-sm font-semibold text-white">${client.name}</h4>
                       <div class="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
@@ -536,18 +593,18 @@ const UI = {
                 `).join('')}
               </div>
             </div>
-            <button onclick="UI.openAddClientModal()" class="mt-4 w-full py-2.5 rounded-xl border border-dashed border-slate-700 text-xs font-medium text-slate-300 hover:border-slate-500 hover:text-white transition-all flex items-center justify-center gap-2">
+            <button onclick="UI.openAddClientModal()" class="mt-4 w-full py-2.5 rounded-2xl border border-dashed border-slate-700 text-xs font-medium text-slate-300 hover:border-slate-500 hover:text-white transition-all flex items-center justify-center gap-2">
               <i data-lucide="plus" class="w-4 h-4"></i> Add New Client
             </button>
           </div>
 
           <!-- Applications Card -->
-          <div class="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm flex flex-col justify-between">
+          <div class="p-6 rounded-3xl card-premium flex flex-col justify-between">
             <div>
               <div class="flex items-center justify-between mb-4">
                 <h3 class="text-base font-bold text-white flex items-center gap-2">
                   <i data-lucide="graduation-cap" class="w-5 h-5 text-purple-400"></i>
-                  Applications & Talent
+                  Applications & Talent Pipeline
                 </h3>
                 <button onclick="UI.navigate('internships')" class="text-xs font-semibold text-purple-400 hover:text-purple-300">
                   Manage Pipeline (${internships.length})
@@ -564,7 +621,7 @@ const UI = {
                   };
 
                   return `
-                    <div class="p-3 rounded-xl bg-slate-800/40 border border-slate-800 flex items-center justify-between hover:bg-slate-800/70 transition-colors">
+                    <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between hover:bg-slate-800/60 transition-colors">
                       <div>
                         <div class="flex items-center gap-2">
                           <h4 class="text-sm font-semibold text-white">${intern.candidateName}</h4>
@@ -576,21 +633,21 @@ const UI = {
                       </div>
                       <div class="text-right">
                         <span class="text-xs text-slate-300">Mentor: ${intern.mentor}</span>
-                        <span class="block text-[10px] text-slate-500">Score: ${intern.evaluationScore}</span>
+                        <span class="block text-[10px] text-slate-500">Evaluation: ${intern.evaluationScore}</span>
                       </div>
                     </div>
                   `;
                 }).join('')}
               </div>
             </div>
-            <button onclick="UI.openAddInternModal()" class="mt-4 w-full py-2.5 rounded-xl border border-dashed border-slate-700 text-xs font-medium text-slate-300 hover:border-slate-500 hover:text-white transition-all flex items-center justify-center gap-2">
+            <button onclick="UI.openAddInternModal()" class="mt-4 w-full py-2.5 rounded-2xl border border-dashed border-slate-700 text-xs font-medium text-slate-300 hover:border-slate-500 hover:text-white transition-all flex items-center justify-center gap-2">
               <i data-lucide="plus" class="w-4 h-4"></i> Register Candidate Application
             </button>
           </div>
         </div>
 
         <!-- 4. IMPORTANT DOCUMENTS ROW -->
-        <div class="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 shadow-sm">
+        <div class="p-6 rounded-3xl card-premium">
           <div class="flex items-center justify-between mb-4">
             <div>
               <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -606,7 +663,7 @@ const UI = {
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             ${documents.slice(0, 3).map(doc => `
-              <div class="p-4 rounded-xl bg-slate-800/40 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between">
+              <div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between">
                 <div>
                   <div class="flex items-center justify-between mb-2">
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono">${doc.fileType}</span>
@@ -626,13 +683,13 @@ const UI = {
           </div>
         </div>
 
-        <!-- 5. SECURITY RESTRICTED SECTIONS (As explicitly requested in PDF!) -->
+        <!-- 5. SECURITY RESTRICTED SECTIONS -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <!-- A. EMPLOYEE WE WORKED WITH (SECURITY RESTRICTION) -->
-          <div class="relative p-6 rounded-2xl bg-slate-900/70 border ${isUnlocked ? 'border-slate-800' : 'border-amber-500/30'} shadow-sm overflow-hidden">
+          <!-- A. EMPLOYEE WE WORKED WITH -->
+          <div class="relative p-6 rounded-3xl card-premium overflow-hidden">
             <div class="flex items-center justify-between mb-4">
               <div class="flex items-center gap-2.5">
-                <div class="p-2 rounded-xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
+                <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
                   <i data-lucide="${isUnlocked ? 'user-check' : 'user-x'}" class="w-5 h-5"></i>
                 </div>
                 <div>
@@ -648,9 +705,9 @@ const UI = {
             </div>
 
             ${!isUnlocked ? `
-              <!-- LOCKED SECURITY OVERLAY -->
-              <div class="p-6 rounded-xl bg-slate-950/80 border border-amber-500/20 text-center flex flex-col items-center justify-center my-2">
-                <div class="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-400 mb-3 animate-shield">
+              <!-- LOCKED OVERLAY -->
+              <div class="p-6 rounded-2xl bg-slate-950/80 border border-amber-500/20 text-center flex flex-col items-center justify-center my-2">
+                <div class="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-400 mb-3 animate-shield">
                   <i data-lucide="shield-alert" class="w-6 h-6"></i>
                 </div>
                 <h4 class="text-sm font-bold text-white mb-1">Access Restricted By Security Policy</h4>
@@ -668,7 +725,7 @@ const UI = {
               <!-- UNLOCKED DATA -->
               <div class="space-y-3">
                 ${pastEmployees.map(emp => `
-                  <div class="p-3 rounded-xl bg-slate-800/40 border border-slate-800 hover:bg-slate-800/70 transition-all flex items-center justify-between">
+                  <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 hover:bg-slate-800/60 transition-all flex items-center justify-between">
                     <div>
                       <div class="flex items-center gap-2">
                         <h4 class="text-sm font-semibold text-white">${emp.name}</h4>
@@ -690,11 +747,11 @@ const UI = {
             `}
           </div>
 
-          <!-- B. CREDENTIALS VAULT (SECURITY RESTRICTION PLEASE) -->
-          <div class="relative p-6 rounded-2xl bg-slate-900/70 border ${isUnlocked ? 'border-slate-800' : 'border-purple-500/30'} shadow-sm overflow-hidden">
+          <!-- B. CREDENTIALS VAULT -->
+          <div class="relative p-6 rounded-3xl card-premium overflow-hidden">
             <div class="flex items-center justify-between mb-4">
               <div class="flex items-center gap-2.5">
-                <div class="p-2 rounded-xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-purple-500/10 text-purple-400'}">
+                <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-purple-500/10 text-purple-400'}">
                   <i data-lucide="key-round" class="w-5 h-5"></i>
                 </div>
                 <div>
@@ -711,8 +768,8 @@ const UI = {
 
             ${!isUnlocked ? `
               <!-- LOCKED OVERLAY -->
-              <div class="p-6 rounded-xl bg-slate-950/80 border border-purple-500/20 text-center flex flex-col items-center justify-center my-2">
-                <div class="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 mb-3 animate-shield">
+              <div class="p-6 rounded-2xl bg-slate-950/80 border border-purple-500/20 text-center flex flex-col items-center justify-center my-2">
+                <div class="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-400 mb-3 animate-shield">
                   <i data-lucide="lock" class="w-6 h-6"></i>
                 </div>
                 <h4 class="text-sm font-bold text-white mb-1">Encrypted Credentials Vault</h4>
@@ -730,15 +787,15 @@ const UI = {
               <!-- UNLOCKED SECRETS -->
               <div class="space-y-3">
                 ${credentials.slice(0, 3).map(cred => `
-                  <div class="p-3 rounded-xl bg-slate-800/40 border border-slate-800 hover:bg-slate-800/70 transition-all">
+                  <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 hover:bg-slate-800/60 transition-all">
                     <div class="flex items-center justify-between mb-1">
                       <h4 class="text-sm font-semibold text-white">${cred.title}</h4>
                       <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">${cred.environment}</span>
                     </div>
-                    <div class="flex items-center justify-between gap-2 bg-slate-950/80 px-3 py-2 rounded-lg border border-slate-800 font-mono text-xs text-slate-300 mt-2">
+                    <div class="flex items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 mt-2">
                       <span class="truncate" id="vault-key-${cred.id}">••••••••••••••••••••••••</span>
                       <div class="flex items-center gap-1 shrink-0">
-                        <button onclick="UI.toggleSecretVisibility('${cred.id}', '${cred.secret}')" class="p-1 text-slate-400 hover:text-white" title="Toggle visibility">
+                        <button onclick="UI.toggleSecretVisibility('vault-key-${cred.id}', '${cred.secret}')" class="p-1 text-slate-400 hover:text-white" title="Toggle visibility">
                           <i data-lucide="eye" class="w-3.5 h-3.5"></i>
                         </button>
                         <button onclick="UI.copyToClipboard('${cred.secret}', '${cred.title}')" class="p-1 text-indigo-400 hover:text-indigo-300" title="Copy secret">
@@ -759,18 +816,109 @@ const UI = {
     `;
   },
 
+  // Initialize Interactive Charts
+  initDashboardCharts() {
+    // 1. Line/Area Chart for Revenue & Velocity
+    const trendCtx = document.getElementById('dashboard-trend-chart');
+    if (trendCtx && window.Chart) {
+      if (window._zeusTrendChart) window._zeusTrendChart.destroy();
+      window._zeusTrendChart = new Chart(trendCtx, {
+        type: 'line',
+        data: {
+          labels: ['Q1 2026', 'Q2 2026', 'Q3 2026', 'Q4 2026 (Est)', 'Q1 2027 (Proj)'],
+          datasets: [
+            {
+              label: 'Enterprise Contract Value ($k)',
+              data: [420, 680, 950, 1430, 1850],
+              borderColor: '#6366f1',
+              backgroundColor: 'rgba(99, 102, 241, 0.12)',
+              fill: true,
+              tension: 0.4,
+              borderWidth: 2.5,
+              pointBackgroundColor: '#6366f1',
+              pointRadius: 4
+            },
+            {
+              label: 'Active Sprint Velocity (pts)',
+              data: [180, 290, 420, 580, 710],
+              borderColor: '#10b981',
+              backgroundColor: 'transparent',
+              borderWidth: 2,
+              borderDash: [5, 5],
+              tension: 0.4,
+              pointRadius: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11 } }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.05)' },
+              ticks: { color: '#64748b', font: { size: 10 } }
+            },
+            y: {
+              grid: { color: 'rgba(255, 255, 255, 0.05)' },
+              ticks: { color: '#64748b', font: { size: 10 } }
+            }
+          }
+        }
+      });
+    }
+
+    // 2. Pie / Doughnut Chart for Stages
+    const pieCtx = document.getElementById('dashboard-pie-chart');
+    if (pieCtx && window.Chart) {
+      if (window._zeusPieChart) window._zeusPieChart.destroy();
+      window._zeusPieChart = new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Live Production', 'QA & Testing', 'Development', 'Planning'],
+          datasets: [{
+            data: [35, 25, 25, 15],
+            backgroundColor: ['#10b981', '#6366f1', '#3b82f6', '#f59e0b'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '72%',
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 10, padding: 8 }
+            }
+          }
+        }
+      });
+    }
+  },
+
   // ==========================================
   // TABLE VIEW: PROJECTS
   // ==========================================
   renderProjectsView() {
     const projects = Store.getProjects();
     const query = (this.searchQueries.projects || '').toLowerCase();
-    const filtered = projects.filter(p => 
-      p.name.toLowerCase().includes(query) ||
-      p.client.toLowerCase().includes(query) ||
-      p.lead.toLowerCase().includes(query) ||
-      p.stage.toLowerCase().includes(query)
-    );
+    const stageFilter = this.filterStates.projectsStage || 'All';
+
+    const filtered = projects.filter(p => {
+      const matchesQuery = p.name.toLowerCase().includes(query) ||
+        p.client.toLowerCase().includes(query) ||
+        p.lead.toLowerCase().includes(query) ||
+        p.stage.toLowerCase().includes(query);
+      const matchesStage = stageFilter === 'All' || p.stage === stageFilter;
+      return matchesQuery && matchesStage;
+    });
+
+    const stagesList = ['All', 'Ideation', 'Planning', 'Development', 'QA & Testing', 'Live Production'];
 
     return `
       <div class="space-y-6 animate-fade-in">
@@ -783,32 +931,48 @@ const UI = {
               placeholder="Search projects by name, client, stage, or lead..." 
               value="${this.searchQueries.projects || ''}"
               oninput="UI.setSearch('projects', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
           </div>
           <div class="flex items-center gap-3">
-            <button onclick="UI.exportToCSV('projects')" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
+            <button onclick="UI.exportToCSV('projects')" class="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
               <i data-lucide="download" class="w-4 h-4"></i> Export CSV
             </button>
-            <button onclick="UI.openAddProjectModal()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+            <button onclick="UI.openAddProjectModal()" class="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
               <i data-lucide="plus" class="w-4 h-4"></i> New Project
             </button>
           </div>
         </div>
 
+        <!-- Filter Pills Bar -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span class="text-slate-500 font-medium mr-1">Stage:</span>
+          ${stagesList.map(st => `
+            <button 
+              onclick="UI.setFilter('projectsStage', '${st}')" 
+              class="px-3 py-1.5 rounded-xl font-medium transition-all ${
+                stageFilter === st 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+              }">
+              ${st}
+            </button>
+          `).join('')}
+        </div>
+
         <!-- Table Container -->
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">Project Name</th>
-                  <th class="py-3.5 px-4">Client</th>
-                  <th class="py-3.5 px-4">Stage</th>
-                  <th class="py-3.5 px-4">Progress</th>
-                  <th class="py-3.5 px-4">Budget</th>
-                  <th class="py-3.5 px-4">Deadline</th>
-                  <th class="py-3.5 px-4">Lead</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">Project Name</th>
+                  <th class="py-4 px-4">Client</th>
+                  <th class="py-4 px-4">Stage</th>
+                  <th class="py-4 px-4">Progress</th>
+                  <th class="py-4 px-4">Budget</th>
+                  <th class="py-4 px-4">Deadline</th>
+                  <th class="py-4 px-4">Lead</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
@@ -816,29 +980,34 @@ const UI = {
                   <tr>
                     <td colspan="8" class="text-center py-12 text-slate-500">
                       <i data-lucide="folder-search" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
-                      No projects found matching your search.
+                      No projects found matching your criteria.
                     </td>
                   </tr>
                 ` : filtered.map(p => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4 font-semibold text-white">${p.name}</td>
-                    <td class="py-3.5 px-4 text-slate-300">
+                    <td class="py-4 px-4 font-semibold text-white">${p.name}</td>
+                    <td class="py-4 px-4 text-slate-300">
                       <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-slate-800 text-slate-300">
                         <i data-lucide="building" class="w-3 h-3 text-slate-400"></i>
                         ${p.client}
                       </span>
                     </td>
-                    <td class="py-3.5 px-4">
-                      <span class="px-2.5 py-1 rounded-full text-xs font-medium ${
+                    <td class="py-4 px-4">
+                      <span class="px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 w-max ${
                         p.stage === 'Live Production' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
                         p.stage === 'QA & Testing' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
                         p.stage === 'Development' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
                         'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                       }">
+                        <span class="status-dot ${
+                          p.stage === 'Live Production' ? 'status-dot-emerald' :
+                          p.stage === 'QA & Testing' ? 'status-dot-indigo' :
+                          'status-dot-amber'
+                        }"></span>
                         ${p.stage}
                       </span>
                     </td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4">
                       <div class="flex items-center gap-2">
                         <div class="w-24 bg-slate-800 rounded-full h-1.5 overflow-hidden">
                           <div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${p.completion}%"></div>
@@ -846,10 +1015,10 @@ const UI = {
                         <span class="text-xs font-mono text-slate-400">${p.completion}%</span>
                       </div>
                     </td>
-                    <td class="py-3.5 px-4 font-mono text-slate-300">${p.budget}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${p.deadline}</td>
-                    <td class="py-3.5 px-4 text-slate-300">${p.lead}</td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 font-mono text-slate-300">${p.budget}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${p.deadline}</td>
+                    <td class="py-4 px-4 text-slate-300">${p.lead}</td>
+                    <td class="py-4 px-4 text-right">
                       <div class="flex items-center justify-end gap-2">
                         <button onclick="UI.deleteProject('${p.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Project">
                           <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -876,12 +1045,16 @@ const UI = {
   renderClientsView() {
     const clients = Store.getClients();
     const query = (this.searchQueries.clients || '').toLowerCase();
-    const filtered = clients.filter(c =>
-      c.name.toLowerCase().includes(query) ||
-      c.industry.toLowerCase().includes(query) ||
-      c.contactPerson.toLowerCase().includes(query) ||
-      c.location.toLowerCase().includes(query)
-    );
+    const statusFilter = this.filterStates.clientsStatus || 'All';
+
+    const filtered = clients.filter(c => {
+      const matchesQuery = c.name.toLowerCase().includes(query) ||
+        c.industry.toLowerCase().includes(query) ||
+        c.contactPerson.toLowerCase().includes(query) ||
+        c.location.toLowerCase().includes(query);
+      const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
 
     return `
       <div class="space-y-6 animate-fade-in">
@@ -893,31 +1066,31 @@ const UI = {
               placeholder="Search clients by company, industry, or location..." 
               value="${this.searchQueries.clients || ''}"
               oninput="UI.setSearch('clients', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
           </div>
           <div class="flex items-center gap-3">
-            <button onclick="UI.exportToCSV('clients')" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
+            <button onclick="UI.exportToCSV('clients')" class="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
               <i data-lucide="download" class="w-4 h-4"></i> Export CSV
             </button>
-            <button onclick="UI.openAddClientModal()" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2">
+            <button onclick="UI.openAddClientModal()" class="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-600/25 flex items-center gap-2">
               <i data-lucide="plus" class="w-4 h-4"></i> Add Client
             </button>
           </div>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">Client Organization</th>
-                  <th class="py-3.5 px-4">Industry / Sector</th>
-                  <th class="py-3.5 px-4">Primary Contact</th>
-                  <th class="py-3.5 px-4">Email</th>
-                  <th class="py-3.5 px-4">Phone</th>
-                  <th class="py-3.5 px-4">Contract Value</th>
-                  <th class="py-3.5 px-4">Status</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">Client Organization</th>
+                  <th class="py-4 px-4">Industry / Sector</th>
+                  <th class="py-4 px-4">Primary Contact</th>
+                  <th class="py-4 px-4">Email</th>
+                  <th class="py-4 px-4">Phone</th>
+                  <th class="py-4 px-4">Contract Value</th>
+                  <th class="py-4 px-4">Status</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
@@ -925,23 +1098,23 @@ const UI = {
                   <tr><td colspan="8" class="text-center py-12 text-slate-500">No clients match your filter.</td></tr>
                 ` : filtered.map(c => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4 font-semibold text-white">
+                    <td class="py-4 px-4 font-semibold text-white">
                       <div>${c.name}</div>
                       <div class="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
                         <i data-lucide="map-pin" class="w-3 h-3 text-slate-500"></i> ${c.location}
                       </div>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300">${c.industry}</td>
-                    <td class="py-3.5 px-4 text-slate-200">${c.contactPerson}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs font-mono">${c.email}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${c.phone}</td>
-                    <td class="py-3.5 px-4 font-mono font-semibold text-emerald-400">${c.contractValue}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-300">${c.industry}</td>
+                    <td class="py-4 px-4 text-slate-200">${c.contactPerson}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs font-mono">${c.email}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${c.phone}</td>
+                    <td class="py-4 px-4 font-mono font-semibold text-emerald-400">${c.contractValue}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                         c.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400'
                       }">${c.status}</span>
                     </td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 text-right">
                       <button onclick="UI.deleteClient('${c.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Client">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                       </button>
@@ -979,36 +1152,36 @@ const UI = {
               placeholder="Search team members by name, role, department..." 
               value="${this.searchQueries.employees || ''}"
               oninput="UI.setSearch('employees', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
           </div>
           <div class="flex items-center gap-3">
-            <button onclick="UI.openAddEmployeeModal()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+            <button onclick="UI.openAddEmployeeModal()" class="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
               <i data-lucide="user-plus" class="w-4 h-4"></i> Add Employee
             </button>
           </div>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">Employee</th>
-                  <th class="py-3.5 px-4">Role / Title</th>
-                  <th class="py-3.5 px-4">Department</th>
-                  <th class="py-3.5 px-4">Company Email</th>
-                  <th class="py-3.5 px-4">Location</th>
-                  <th class="py-3.5 px-4">Status</th>
-                  <th class="py-3.5 px-4">Join Date</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">Employee</th>
+                  <th class="py-4 px-4">Role / Title</th>
+                  <th class="py-4 px-4">Department</th>
+                  <th class="py-4 px-4">Company Email</th>
+                  <th class="py-4 px-4">Location</th>
+                  <th class="py-4 px-4">Status</th>
+                  <th class="py-4 px-4">Join Date</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
                 ${filtered.map(emp => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4">
                       <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
+                        <div class="w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs ring-1 ring-indigo-500/30">
                           ${emp.name.split(' ').map(n=>n[0]).join('')}
                         </div>
                         <div>
@@ -1017,17 +1190,17 @@ const UI = {
                         </div>
                       </div>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300 font-medium">${emp.role}</td>
-                    <td class="py-3.5 px-4 text-slate-400">${emp.department}</td>
-                    <td class="py-3.5 px-4 text-slate-300 font-mono text-xs">${emp.email}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${emp.location}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-300 font-medium">${emp.role}</td>
+                    <td class="py-4 px-4 text-slate-400">${emp.department}</td>
+                    <td class="py-4 px-4 text-slate-300 font-mono text-xs">${emp.email}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.location}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         ${emp.status}
                       </span>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${emp.joinDate}</td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.joinDate}</td>
+                    <td class="py-4 px-4 text-right">
                       <button onclick="UI.deleteEmployee('${emp.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Remove Employee">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                       </button>
@@ -1049,8 +1222,8 @@ const UI = {
     const isUnlocked = Security.isUnlocked();
     if (!isUnlocked) {
       return `
-        <div class="p-12 rounded-2xl bg-slate-900/70 border border-amber-500/30 text-center max-w-xl mx-auto my-12 animate-fade-in">
-          <div class="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto mb-4 animate-shield">
+        <div class="p-12 rounded-3xl card-premium border-amber-500/30 text-center max-w-xl mx-auto my-12 animate-fade-in">
+          <div class="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto mb-4 animate-shield ring-1 ring-amber-500/30">
             <i data-lucide="shield-alert" class="w-8 h-8"></i>
           </div>
           <h3 class="text-xl font-bold text-white mb-2">Confidential Personnel Vault Gated</h3>
@@ -1059,7 +1232,7 @@ const UI = {
           </p>
           <button 
             onclick="Security.challenge('past-employees', () => UI.render())"
-            class="px-6 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold shadow-lg shadow-amber-600/20 transition-all inline-flex items-center gap-2">
+            class="px-6 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold shadow-lg shadow-amber-600/25 transition-all inline-flex items-center gap-2">
             <i data-lucide="key-round" class="w-4 h-4"></i> Enter Clearance PIN (Default: 7799)
           </button>
         </div>
@@ -1076,12 +1249,12 @@ const UI = {
 
     return `
       <div class="space-y-6 animate-fade-in">
-        <div class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+        <div class="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
           <div class="flex items-center gap-3 text-amber-300 text-xs">
             <i data-lucide="shield-check" class="w-5 h-5 text-amber-400"></i>
             <span><strong>Clearance Verified:</strong> Viewing confidential contractor and alumni records. Session will automatically re-lock on inactivity.</span>
           </div>
-          <button onclick="Security.lock(); UI.render();" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold transition-all flex items-center gap-1.5">
+          <button onclick="Security.lock(); UI.render();" class="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold transition-all flex items-center gap-1.5">
             <i data-lucide="lock" class="w-3.5 h-3.5"></i> Lock Archive
           </button>
         </div>
@@ -1094,52 +1267,52 @@ const UI = {
               placeholder="Search historical records by name, role, project..." 
               value="${this.searchQueries.pastEmployees || ''}"
               oninput="UI.setSearch('pastEmployees', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
           </div>
-          <button onclick="UI.openAddPastEmployeeModal()" class="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2">
+          <button onclick="UI.openAddPastEmployeeModal()" class="px-4 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-lg shadow-amber-600/25 flex items-center gap-2">
             <i data-lucide="plus" class="w-4 h-4"></i> Archive Personnel Record
           </button>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">Individual</th>
-                  <th class="py-3.5 px-4">Former Role</th>
-                  <th class="py-3.5 px-4">Engagement Type</th>
-                  <th class="py-3.5 px-4">Period</th>
-                  <th class="py-3.5 px-4">Clearance Level</th>
-                  <th class="py-3.5 px-4">Key Projects</th>
-                  <th class="py-3.5 px-4">Rating</th>
-                  <th class="py-3.5 px-4">Exit Status</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">Individual</th>
+                  <th class="py-4 px-4">Former Role</th>
+                  <th class="py-4 px-4">Engagement Type</th>
+                  <th class="py-4 px-4">Period</th>
+                  <th class="py-4 px-4">Clearance Level</th>
+                  <th class="py-4 px-4">Key Projects</th>
+                  <th class="py-4 px-4">Rating</th>
+                  <th class="py-4 px-4">Exit Status</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
                 ${filtered.map(emp => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4">
                       <div class="font-semibold text-white">${emp.name}</div>
                       <div class="text-[11px] text-slate-400 font-mono">${emp.currentContact}</div>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300">${emp.formerRole}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${emp.engagementType}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${emp.period}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-300">${emp.formerRole}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.engagementType}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.period}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2 py-0.5 rounded text-[11px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
                         ${emp.clearanceLevel}
                       </span>
                     </td>
-                    <td class="py-3.5 px-4 text-xs text-slate-300 max-w-xs truncate">${emp.projectsWorkedOn}</td>
-                    <td class="py-3.5 px-4 font-bold text-amber-400">${emp.performanceScore}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-xs text-slate-300 max-w-xs truncate">${emp.projectsWorkedOn}</td>
+                    <td class="py-4 px-4 font-bold text-amber-400">${emp.performanceScore}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2 py-0.5 rounded-full text-[11px] bg-slate-800 text-slate-300">
                         ${emp.status}
                       </span>
                     </td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 text-right">
                       <button onclick="UI.deletePastEmployee('${emp.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Archive">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                       </button>
@@ -1176,50 +1349,50 @@ const UI = {
               placeholder="Search documents by title, category, or author..." 
               value="${this.searchQueries.documents || ''}"
               oninput="UI.setSearch('documents', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
           </div>
-          <button onclick="UI.openAddDocumentModal()" class="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2">
+          <button onclick="UI.openAddDocumentModal()" class="px-4 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg shadow-blue-600/25 flex items-center gap-2">
             <i data-lucide="file-up" class="w-4 h-4"></i> Register Document
           </button>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">Document Title</th>
-                  <th class="py-3.5 px-4">Category</th>
-                  <th class="py-3.5 px-4">Format</th>
-                  <th class="py-3.5 px-4">File Size</th>
-                  <th class="py-3.5 px-4">Classification</th>
-                  <th class="py-3.5 px-4">Registered By</th>
-                  <th class="py-3.5 px-4">Last Modified</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">Document Title</th>
+                  <th class="py-4 px-4">Category</th>
+                  <th class="py-4 px-4">Format</th>
+                  <th class="py-4 px-4">File Size</th>
+                  <th class="py-4 px-4">Classification</th>
+                  <th class="py-4 px-4">Registered By</th>
+                  <th class="py-4 px-4">Last Modified</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
                 ${filtered.map(doc => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-2">
+                    <td class="py-4 px-4 font-semibold text-white flex items-center gap-2">
                       <i data-lucide="file-text" class="w-4 h-4 text-blue-400"></i>
                       ${doc.title}
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300">${doc.category}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-300">${doc.category}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-slate-800 text-slate-300">${doc.fileType}</span>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs font-mono">${doc.size}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-400 text-xs font-mono">${doc.size}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs ${
                         doc.accessLevel === 'Confidential' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
                         doc.accessLevel === 'Restricted' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
                         'bg-slate-800 text-slate-300'
                       }">${doc.accessLevel}</span>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${doc.author}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${doc.updatedAt}</td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 text-slate-400 text-xs">${doc.author}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${doc.updatedAt}</td>
+                    <td class="py-4 px-4 text-right">
                       <div class="flex items-center justify-end gap-1">
                         <button onclick="UI.previewDocument('${doc.id}')" class="p-1.5 rounded-lg text-indigo-400 hover:bg-slate-800" title="Preview Document">
                           <i data-lucide="eye" class="w-4 h-4"></i>
@@ -1264,16 +1437,16 @@ const UI = {
               placeholder="Search templates by title or category..." 
               value="${this.searchQueries.templates || ''}"
               oninput="UI.setSearch('templates', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
           </div>
-          <button onclick="UI.openAddTemplateModal()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+          <button onclick="UI.openAddTemplateModal()" class="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
             <i data-lucide="plus" class="w-4 h-4"></i> Add Template
           </button>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           ${filtered.map(tpl => `
-            <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col justify-between">
+            <div class="p-5 rounded-3xl card-premium flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between mb-3">
                   <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase tracking-wider">${tpl.category}</span>
@@ -1288,10 +1461,10 @@ const UI = {
                   <i data-lucide="download-cloud" class="w-3.5 h-3.5"></i> ${tpl.downloadsCount} uses
                 </span>
                 <div class="flex items-center gap-2">
-                  <button onclick="UI.copyTemplateMock('${tpl.title}')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center gap-1.5 transition-colors">
+                  <button onclick="UI.copyTemplateMock('${tpl.title}')" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center gap-1.5 transition-colors">
                     <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy
                   </button>
-                  <button onclick="UI.downloadDocumentMock('${tpl.title}')" class="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 font-medium flex items-center gap-1.5 transition-colors">
+                  <button onclick="UI.downloadDocumentMock('${tpl.title}')" class="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 font-medium flex items-center gap-1.5 transition-colors">
                     <i data-lucide="download" class="w-3.5 h-3.5"></i> Get
                   </button>
                 </div>
@@ -1309,12 +1482,18 @@ const UI = {
   renderInternshipsView() {
     const internships = Store.getInternships();
     const query = (this.searchQueries.internships || '').toLowerCase();
-    const filtered = internships.filter(i =>
-      i.candidateName.toLowerCase().includes(query) ||
-      i.institution.toLowerCase().includes(query) ||
-      i.track.toLowerCase().includes(query) ||
-      i.mentor.toLowerCase().includes(query)
-    );
+    const statusFilter = this.filterStates.internshipsStatus || 'All';
+
+    const filtered = internships.filter(i => {
+      const matchesQuery = i.candidateName.toLowerCase().includes(query) ||
+        i.institution.toLowerCase().includes(query) ||
+        i.track.toLowerCase().includes(query) ||
+        i.mentor.toLowerCase().includes(query);
+      const matchesStatus = statusFilter === 'All' || i.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
+
+    const statusOptions = ['All', 'Accepted', 'Interviewing', 'Reviewing', 'Pending'];
 
     return `
       <div class="space-y-6 animate-fade-in">
@@ -1326,38 +1505,54 @@ const UI = {
               placeholder="Search interns by name, school, track, mentor..." 
               value="${this.searchQueries.internships || ''}"
               oninput="UI.setSearch('internships', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500">
           </div>
-          <button onclick="UI.openAddInternModal()" class="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 flex items-center gap-2">
+          <button onclick="UI.openAddInternModal()" class="px-4 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/25 flex items-center gap-2">
             <i data-lucide="user-plus" class="w-4 h-4"></i> New Applicant
           </button>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <!-- Filter Pills Bar -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span class="text-slate-500 font-medium mr-1">Status:</span>
+          ${statusOptions.map(st => `
+            <button 
+              onclick="UI.setFilter('internshipsStatus', '${st}')" 
+              class="px-3 py-1.5 rounded-xl font-medium transition-all ${
+                statusFilter === st 
+                  ? 'bg-purple-600 text-white shadow-sm' 
+                  : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+              }">
+              ${st}
+            </button>
+          `).join('')}
+        </div>
+
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">Candidate</th>
-                  <th class="py-3.5 px-4">Academic Institution</th>
-                  <th class="py-3.5 px-4">Track / Focus</th>
-                  <th class="py-3.5 px-4">Status</th>
-                  <th class="py-3.5 px-4">Assigned Mentor</th>
-                  <th class="py-3.5 px-4">Project Assigned</th>
-                  <th class="py-3.5 px-4">Evaluation</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">Candidate</th>
+                  <th class="py-4 px-4">Academic Institution</th>
+                  <th class="py-4 px-4">Track / Focus</th>
+                  <th class="py-4 px-4">Status</th>
+                  <th class="py-4 px-4">Assigned Mentor</th>
+                  <th class="py-4 px-4">Project Assigned</th>
+                  <th class="py-4 px-4">Evaluation</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
                 ${filtered.map(intern => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4">
                       <div class="font-semibold text-white">${intern.candidateName}</div>
                       <div class="text-[11px] text-slate-400 font-mono">${intern.email}</div>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300">${intern.institution}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${intern.track}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-300">${intern.institution}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${intern.track}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                         intern.status === 'Accepted' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
                         intern.status === 'Interviewing' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
@@ -1365,10 +1560,10 @@ const UI = {
                         'bg-slate-800 text-slate-300'
                       }">${intern.status}</span>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300">${intern.mentor}</td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${intern.assignedProject}</td>
-                    <td class="py-3.5 px-4 font-bold text-purple-400">${intern.evaluationScore}</td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 text-slate-300">${intern.mentor}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${intern.assignedProject}</td>
+                    <td class="py-4 px-4 font-bold text-purple-400">${intern.evaluationScore}</td>
+                    <td class="py-4 px-4 text-right">
                       <button onclick="UI.deleteIntern('${intern.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Applicant">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                       </button>
@@ -1390,8 +1585,8 @@ const UI = {
     const isUnlocked = Security.isUnlocked();
     if (!isUnlocked) {
       return `
-        <div class="p-12 rounded-2xl bg-slate-900/70 border border-purple-500/30 text-center max-w-xl mx-auto my-12 animate-fade-in">
-          <div class="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto mb-4 animate-shield">
+        <div class="p-12 rounded-3xl card-premium border-purple-500/30 text-center max-w-xl mx-auto my-12 animate-fade-in">
+          <div class="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mx-auto mb-4 animate-shield ring-1 ring-purple-500/30">
             <i data-lucide="lock" class="w-8 h-8"></i>
           </div>
           <h3 class="text-xl font-bold text-white mb-2">Master Credentials Vault Encrypted</h3>
@@ -1400,7 +1595,7 @@ const UI = {
           </p>
           <button 
             onclick="Security.challenge('credentials', () => UI.render())"
-            class="px-6 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold shadow-lg shadow-purple-600/20 transition-all inline-flex items-center gap-2">
+            class="px-6 py-3 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold shadow-lg shadow-purple-600/25 transition-all inline-flex items-center gap-2">
             <i data-lucide="shield-check" class="w-4 h-4"></i> Unlock Vault (Default PIN: 7799)
           </button>
         </div>
@@ -1417,12 +1612,12 @@ const UI = {
 
     return `
       <div class="space-y-6 animate-fade-in">
-        <div class="p-4 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
+        <div class="p-4 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
           <div class="flex items-center gap-3 text-purple-300 text-xs">
             <i data-lucide="shield-check" class="w-5 h-5 text-purple-400"></i>
             <span><strong>Clearance Verified:</strong> Production credentials vault unlocked. Copy actions are logged for corporate audit.</span>
           </div>
-          <button onclick="Security.lock(); UI.render();" class="px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-bold transition-all flex items-center gap-1.5">
+          <button onclick="Security.lock(); UI.render();" class="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-bold transition-all flex items-center gap-1.5">
             <i data-lucide="lock" class="w-3.5 h-3.5"></i> Lock Vault
           </button>
         </div>
@@ -1435,19 +1630,19 @@ const UI = {
               placeholder="Search secrets by title, service, environment..." 
               value="${this.searchQueries.credentials || ''}"
               oninput="UI.setSearch('credentials', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500">
           </div>
-          <button onclick="UI.openAddCredentialModal()" class="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 flex items-center gap-2">
+          <button onclick="UI.openAddCredentialModal()" class="px-4 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/25 flex items-center gap-2">
             <i data-lucide="plus" class="w-4 h-4"></i> Add Secret Key
           </button>
         </div>
 
         <div class="space-y-4">
           ${filtered.map(cred => `
-            <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 transition-all">
+            <div class="p-5 rounded-3xl card-premium">
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                 <div class="flex items-center gap-3">
-                  <div class="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+                  <div class="p-2.5 rounded-2xl bg-purple-500/10 text-purple-400 ring-1 ring-purple-500/20">
                     <i data-lucide="key" class="w-5 h-5"></i>
                   </div>
                   <div>
@@ -1466,13 +1661,13 @@ const UI = {
               </div>
 
               <!-- Masked Secret Box -->
-              <div class="flex items-center justify-between gap-3 bg-slate-950/90 border border-slate-800 p-3 rounded-xl font-mono text-xs">
+              <div class="flex items-center justify-between gap-3 bg-slate-950/90 border border-slate-800 p-3.5 rounded-2xl font-mono text-xs">
                 <span id="cred-val-${cred.id}" class="text-slate-400 truncate tracking-wider">••••••••••••••••••••••••••••••••</span>
                 <div class="flex items-center gap-2 shrink-0">
-                  <button onclick="UI.toggleSecretVisibility('cred-val-${cred.id}', '${cred.secret}')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 transition-colors">
+                  <button onclick="UI.toggleSecretVisibility('cred-val-${cred.id}', '${cred.secret}')" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 transition-colors">
                     <i data-lucide="eye" class="w-3.5 h-3.5"></i> Reveal
                   </button>
-                  <button onclick="UI.copyToClipboard('${cred.secret}', '${cred.title}')" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors">
+                  <button onclick="UI.copyToClipboard('${cred.secret}', '${cred.title}')" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors">
                     <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Secret
                   </button>
                 </div>
@@ -1512,53 +1707,53 @@ const UI = {
               placeholder="Search users by name, company email, role..." 
               value="${this.searchQueries.users || ''}"
               oninput="UI.setSearch('users', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
           </div>
           <div class="flex items-center gap-3">
-            <button onclick="UI.openAddDomainModal()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
-              <i data-lucide="globe" class="w-4 h-4"></i> Manage Company Domains
+            <button onclick="UI.openAddDomainModal()" class="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
+              <i data-lucide="globe" class="w-4 h-4"></i> Manage Domains
             </button>
-            <button onclick="UI.openAddUserModal()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+            <button onclick="UI.openAddUserModal()" class="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
               <i data-lucide="user-plus" class="w-4 h-4"></i> Add User
             </button>
           </div>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/70 border border-slate-800/80 overflow-hidden shadow-sm">
+        <div class="rounded-3xl card-premium overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-3.5 px-4">User</th>
-                  <th class="py-3.5 px-4">Authorized Company Account</th>
-                  <th class="py-3.5 px-4">Organization / Domain</th>
-                  <th class="py-3.5 px-4">Role</th>
-                  <th class="py-3.5 px-4">Status</th>
-                  <th class="py-3.5 px-4">Last Active</th>
-                  <th class="py-3.5 px-4 text-right">Actions</th>
+                  <th class="py-4 px-4">User</th>
+                  <th class="py-4 px-4">Authorized Company Account</th>
+                  <th class="py-4 px-4">Organization / Domain</th>
+                  <th class="py-4 px-4">Role</th>
+                  <th class="py-4 px-4">Status</th>
+                  <th class="py-4 px-4">Last Active</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60 text-sm">
                 ${filtered.map(u => `
                   <tr class="table-row-hover">
-                    <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-3">
-                      <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-indigo-400">
+                    <td class="py-4 px-4 font-semibold text-white flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-indigo-400 ring-1 ring-slate-700">
                         ${u.name[0]}
                       </div>
                       ${u.name}
                     </td>
-                    <td class="py-3.5 px-4 font-mono text-slate-300 text-xs">${u.email}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 font-mono text-slate-300 text-xs">${u.email}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2 py-0.5 rounded text-xs font-mono bg-slate-800 text-slate-300">@${u.domain}</span>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-300 font-medium">${u.role}</td>
-                    <td class="py-3.5 px-4">
+                    <td class="py-4 px-4 text-slate-300 font-medium">${u.role}</td>
+                    <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         ${u.status}
                       </span>
                     </td>
-                    <td class="py-3.5 px-4 text-slate-400 text-xs">${u.lastLogin}</td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-4 px-4 text-slate-400 text-xs">${u.lastLogin}</td>
+                    <td class="py-4 px-4 text-right">
                       <button onclick="UI.deleteUser('${u.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Revoke User Access">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                       </button>
@@ -1574,10 +1769,15 @@ const UI = {
   },
 
   // ==========================================
-  // HELPER ACTIONS & INTERACTION LOGIC
+  // HELPER ACTIONS & FILTERS
   // ==========================================
   setSearch(key, val) {
     this.searchQueries[key] = val;
+    this.render();
+  },
+
+  setFilter(key, val) {
+    this.filterStates[key] = val;
     this.render();
   },
 
@@ -1634,7 +1834,7 @@ const UI = {
           </button>
         </div>
 
-        <div class="my-6 p-6 rounded-xl bg-slate-950/80 border border-slate-800 font-mono text-xs text-slate-300 space-y-4 max-h-[60vh] overflow-y-auto">
+        <div class="my-6 p-6 rounded-2xl bg-slate-950/80 border border-slate-800 font-mono text-xs text-slate-300 space-y-4 max-h-[60vh] overflow-y-auto">
           <p class="text-emerald-400 font-bold">// ZEUS SECURE DOCUMENT ENCLAVE VERIFIED</p>
           <p>Document Hash: sha256_88b9c02e18fa4d92039ab1849f92e84</p>
           <hr class="border-slate-800">
@@ -2304,7 +2504,7 @@ const UI = {
         </p>
         <div class="space-y-2">
           ${domains.map(d => `
-            <div class="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-emerald-400 flex items-center justify-between">
+            <div class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono text-emerald-400 flex items-center justify-between">
               <span>@${d}</span>
               <span class="text-[10px] text-slate-500 uppercase">Authorized</span>
             </div>
