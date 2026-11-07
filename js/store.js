@@ -743,3 +743,4 @@ const Store = {
 
 // Initialize store immediately
 Store.init();
+

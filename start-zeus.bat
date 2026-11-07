@@ -7,3 +7,4 @@ echo  Opening in your default browser...
 start "" "%~dp0index.html"
 echo  Launched successfully!
 exit
+

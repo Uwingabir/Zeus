@@ -72,3 +72,4 @@ const Security = {
     UI.openSecurityModal(targetView, onSuccess);
   }
 };
+
