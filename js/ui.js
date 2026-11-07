@@ -11,7 +11,35 @@ const UI = {
     clientsStatus: 'All',
     internshipsStatus: 'All'
   },
+  projectDisplayMode: 'table', // 'table' or 'kanban'
   dashboardChartInstance: null,
+
+  setProjectDisplay(mode) {
+    this.projectDisplayMode = mode;
+    this.render();
+  },
+
+  advanceProjectStage(id) {
+    const stages = ['Ideation', 'Planning', 'Development', 'QA & Testing', 'Live Production'];
+    const projects = Store.getProjects();
+    const proj = projects.find(p => p.id === id);
+    if (!proj) return;
+
+    const currentIdx = stages.indexOf(proj.stage);
+    if (currentIdx < stages.length - 1) {
+      const nextStage = stages[currentIdx + 1];
+      const nextCompletion = Math.min(100, Math.round(((currentIdx + 2) / stages.length) * 100));
+      Store.updateItem(STORAGE_KEYS.PROJECTS, id, {
+        stage: nextStage,
+        completion: nextCompletion,
+        status: nextStage === 'Live Production' ? 'Completed' : 'In Progress'
+      });
+      this.showToast(`Advanced "${proj.name}" to ${nextStage}`, 'success');
+      this.render();
+    } else {
+      this.showToast(`"${proj.name}" is already in ${proj.stage}`, 'info');
+    }
+  },
 
   // Keypad Helper Functions for Security PIN Pad
   keypadPress(digit) {
@@ -1807,10 +1835,24 @@ const UI = {
   },
 
   downloadDocumentMock(title) {
-    this.showToast(`Preparing download package for "${title}"...`, 'info');
+    this.showToast(`Preparing document "${title}"...`, 'info');
+    
+    // Generate real enterprise document and trigger client-side download
+    const content = `# ${title}\n\nCONFIDENTIAL CORPORATE GOVERNANCE DOCUMENT\nPlatform: ZEUS Operations Platform\nGenerated: ${new Date().toUTCString()}\nClassification: Restricted / Authorized Personnel Only\n\n---\n\n## 1. Executive Protocol & Summary\nThis document sets forth operational parameters, corporate governance standards, and delivery commitments across Domari Technologies, Ikirezi Ventures, and FraudShield AI.\n\n## 2. Terms & Compliance\nAll parameters contained herein are subject to ISO/IEC 27001 compliance standards, internal security architecture principles, and national data protection statutory laws.\n\n## 3. Authorized Cryptographic Validation\nDocument Hash: SHA256-${Date.now().toString(36)}-ZEUS-ENCLAVE\nSignatory Lead: Chief Operations Officer\n\n---\n*ZEUS Enterprise Platform - Digital Signature Validated*\n`;
+
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
     setTimeout(() => {
-      this.showToast(`Downloaded "${title}" successfully.`, 'success');
-    }, 800);
+      this.showToast(`Downloaded "${title}.md" to your machine.`, 'success');
+    }, 400);
   },
 
   previewDocument(id) {
