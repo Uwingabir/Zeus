@@ -35,51 +35,151 @@
   <!-- Chart.js CDN for Visual Analytics -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+  <!-- Supabase Cloud Database Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <!-- Custom CSS -->
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="bg-[#0B0F17] text-slate-100 min-h-screen selection:bg-indigo-500 selection:text-white flex flex-col font-sans bg-grid-pattern">
 
   <!-- ========================================================= -->
-  <!-- 1. LOGIN VIEW (Initial screen: strict company domain auth) -->
+  <!-- 1. AUTHENTICATION VIEW (Create Account & Sign In Tabs)     -->
   <!-- ========================================================= -->
   <div id="login-view" class="min-h-screen flex items-center justify-center p-4 sm:p-6 relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#0B0F17] to-[#07090e]">
     <!-- Ambient background glow elements -->
     <div class="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
     <div class="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-600/15 rounded-full blur-3xl pointer-events-none"></div>
 
-    <div class="w-full max-w-md relative z-10">
+    <div class="w-full max-w-lg relative z-10">
       <!-- Zeus Brand Emblem -->
-      <div class="text-center mb-8">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white shadow-2xl shadow-indigo-600/40 mb-4 ring-1 ring-white/20">
+      <div class="text-center mb-6">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white shadow-2xl shadow-indigo-600/40 mb-3 ring-1 ring-white/20">
           <i data-lucide="zap" class="w-8 h-8 fill-white"></i>
         </div>
         <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center justify-center gap-2">
           ZEUS
           <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-            ENTERPRISE
+            SECURE
           </span>
         </h1>
-        <p class="text-xs text-slate-400 mt-2 font-medium">Centralized Operations & Intelligence Suite</p>
+        <p class="text-xs text-slate-400 mt-1 font-medium">Enterprise Operations & Intelligence Platform</p>
       </div>
 
-      <!-- Login Card -->
-      <div class="p-8 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl backdrop-blur-xl">
-        <div class="mb-6">
-          <h2 class="text-lg font-bold text-white">Sign In to Workspace</h2>
-          <p class="text-xs text-slate-400 mt-1">
-            Access requires an authorized corporate account.
-          </p>
-          <div class="mt-3 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center gap-2 text-[11px] text-slate-400">
-            <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400 shrink-0"></i>
-            <span id="allowed-domains-hint">Authorized: @domari, @ikirezi, @fraudshield</span>
-          </div>
+      <!-- Auth Container Card -->
+      <div class="p-8 rounded-3xl bg-slate-900/85 border border-slate-800 shadow-2xl backdrop-blur-xl">
+        <!-- Auth Tab Navigation: Create Account vs Sign In -->
+        <div class="flex items-center rounded-2xl bg-slate-950 p-1 border border-slate-800 mb-6">
+          <button 
+            type="button" 
+            id="tab-btn-register"
+            onclick="App.switchAuthTab('register')" 
+            class="flex-1 py-2 rounded-xl text-xs font-bold transition-all bg-indigo-600 text-white shadow-sm flex items-center justify-center gap-1.5">
+            <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+            <span>Create Account</span>
+          </button>
+          <button 
+            type="button" 
+            id="tab-btn-login"
+            onclick="App.switchAuthTab('login')" 
+            class="flex-1 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-white flex items-center justify-center gap-1.5">
+            <i data-lucide="log-in" class="w-3.5 h-3.5"></i>
+            <span>Sign In</span>
+          </button>
         </div>
 
-        <!-- Error Message Alert -->
-        <div id="login-error" class="hidden mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium"></div>
+        <!-- Authorized Company Domains Banner -->
+        <div class="mb-5 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center gap-2 text-[11px] text-slate-400">
+          <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+          <span id="allowed-domains-hint">Company accounts only: @domari, @ikirezi, @fraudshield</span>
+        </div>
 
-        <form id="login-form" class="space-y-4">
+        <!-- Error & Success Message Alerts -->
+        <div id="auth-error" class="hidden mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium"></div>
+        <div id="auth-success" class="hidden mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium"></div>
+
+        <!-- FORM A: CREATE ACCOUNT (User requested: must create account before signing in) -->
+        <form id="register-form" class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Full Name</label>
+            <div class="relative">
+              <i data-lucide="user" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"></i>
+              <input 
+                id="reg-name" 
+                type="text" 
+                required 
+                placeholder="e.g. Jeanine Umwali"
+                class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Company Email</label>
+            <div class="relative">
+              <i data-lucide="mail" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"></i>
+              <input 
+                id="reg-email" 
+                type="email" 
+                required 
+                placeholder="name@domari.com or ikirezi or fraudshield"
+                class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Role / Title</label>
+              <input 
+                id="reg-role" 
+                type="text" 
+                required 
+                placeholder="e.g. Lead Architect"
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Department</label>
+              <select id="reg-department" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-indigo-500">
+                <option value="Engineering">Engineering</option>
+                <option value="Cybersecurity">Cybersecurity</option>
+                <option value="Product Delivery">Product Delivery</option>
+                <option value="Infrastructure">Infrastructure</option>
+                <option value="Operations">Operations</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+              <input 
+                id="reg-password" 
+                type="password" 
+                required 
+                placeholder="Min 8 chars"
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Confirm Password</label>
+              <input 
+                id="reg-confirm-password" 
+                type="password" 
+                required 
+                placeholder="Re-enter"
+                class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500">
+            </div>
+          </div>
+          <p class="text-[10px] text-slate-400">Security Requirement: Password must have at least 8 characters with numbers and letters.</p>
+
+          <button 
+            type="submit" 
+            class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 mt-4">
+            <i data-lucide="user-check" class="w-4 h-4"></i>
+            <span>Create Company Account</span>
+          </button>
+        </form>
+
+        <!-- FORM B: SIGN IN -->
+        <form id="login-form" class="space-y-4 hidden">
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Company Account Email</label>
             <div class="relative">
@@ -102,7 +202,6 @@
                 type="password" 
                 required 
                 placeholder="••••••••••••"
-                value="Zeus@2026"
                 class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors">
             </div>
           </div>
@@ -112,7 +211,7 @@
               <input type="checkbox" checked class="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0">
               <span>Remember session</span>
             </label>
-            <a href="#" onclick="alert('For security assistance, contact IT Support or security@fraudshield.ai.')" class="text-indigo-400 hover:text-indigo-300">Need help?</a>
+            <a href="#" onclick="alert('For security assistance, contact corporate security: security@fraudshield.ai')" class="text-indigo-400 hover:text-indigo-300">Need help?</a>
           </div>
 
           <button 
@@ -122,40 +221,11 @@
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
         </form>
-
-        <!-- Fast Demo Quick Access -->
-        <div class="mt-8 pt-6 border-t border-slate-800/80">
-          <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 text-center">
-            One-Click Demo Profiles
-          </span>
-          <div class="grid grid-cols-3 gap-2">
-            <button 
-              type="button" 
-              data-quick-login="domari" 
-              class="px-2.5 py-2.5 rounded-xl bg-slate-800/70 hover:bg-indigo-600/20 border border-slate-700/60 hover:border-indigo-500/40 text-[11px] text-slate-300 hover:text-white transition-all text-center">
-              <strong class="block text-indigo-400 font-semibold">@domari</strong>
-              Alexandre N.
-            </button>
-            <button 
-              type="button" 
-              data-quick-login="ikirezi" 
-              class="px-2.5 py-2.5 rounded-xl bg-slate-800/70 hover:bg-emerald-600/20 border border-slate-700/60 hover:border-emerald-500/40 text-[11px] text-slate-300 hover:text-white transition-all text-center">
-              <strong class="block text-emerald-400 font-semibold">@ikirezi</strong>
-              Sarah Uwase
-            </button>
-            <button 
-              type="button" 
-              data-quick-login="fraudshield" 
-              class="px-2.5 py-2.5 rounded-xl bg-slate-800/70 hover:bg-purple-600/20 border border-slate-700/60 hover:border-purple-500/40 text-[11px] text-slate-300 hover:text-white transition-all text-center">
-              <strong class="block text-purple-400 font-semibold">@fraudshield</strong>
-              David Mugisha
-            </button>
-          </div>
-        </div>
       </div>
 
-      <p class="text-center text-[11px] text-slate-500 mt-6">
-        Protected under corporate security policy. All activities logged and audited.
+      <p class="text-center text-[11px] text-slate-500 mt-6 flex items-center justify-center gap-1.5">
+        <i data-lucide="lock" class="w-3.5 h-3.5 text-emerald-400"></i>
+        AES-256 Encrypted & Protected against unauthorized tampering
       </p>
     </div>
   </div>
@@ -176,7 +246,7 @@
             <div>
               <div class="flex items-center gap-1.5">
                 <span class="font-extrabold text-base tracking-tight text-white">ZEUS</span>
-                <span class="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">v2.4</span>
+                <span class="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400">v2.5</span>
               </div>
               <p class="text-[11px] text-slate-400">Operations Control</p>
             </div>
@@ -235,19 +305,20 @@
             <kbd class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">Ctrl K</kbd>
           </button>
 
+          <!-- Real Supabase Cloud Database Status & Configuration -->
+          <button 
+            onclick="UI.openSupabaseModal()" 
+            id="header-supabase-btn"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-slate-300 hover:text-white transition-all shadow-sm"
+            title="Configure Real Supabase Database">
+            <span class="status-dot status-dot-emerald" id="supabase-status-dot"></span>
+            <span id="supabase-status-text">Database Cloud</span>
+          </button>
+
           <!-- Header Security Indicator / Quick Lock -->
           <div id="header-security-badge">
             <!-- Dynamically populated by UI.renderHeaderSecurityIndicator -->
           </div>
-
-          <!-- Fast Reset Data Option -->
-          <button 
-            onclick="App.resetAllData()" 
-            class="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all"
-            title="Reset system demo records">
-            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
-            <span>Reset Demo</span>
-          </button>
 
           <!-- Logout Button (Prominent, as requested in PDF!) -->
           <button 
@@ -269,8 +340,83 @@
   </div>
 
   <!-- ========================================================= -->
-  <!-- 3. SECURITY CLEARANCE CHALLENGE MODAL                     -->
-  <!-- Protects "Employee we worked with" and "Credentials Vault"-->
+  <!-- 3. SUPABASE CLOUD DATABASE CONFIGURATION MODAL           -->
+  <!-- ========================================================= -->
+  <div id="supabase-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+    <div class="w-full max-w-lg rounded-3xl bg-slate-900 border border-emerald-500/30 shadow-2xl p-6 relative">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+        <div class="flex items-center gap-2.5">
+          <div class="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+            <i data-lucide="database" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Supabase Cloud Database</h3>
+            <p class="text-xs text-slate-400">Real-time PostgreSQL persistence for all records</p>
+          </div>
+        </div>
+        <button onclick="UI.closeSupabaseModal()" class="text-slate-400 hover:text-white p-1">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <p class="text-xs text-slate-300 leading-relaxed">
+          Connect your project to Supabase so all employees, projects, clients, credentials, and documents are stored in a real PostgreSQL database.
+        </p>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Supabase Project URL</label>
+          <input 
+            id="supabase-url-input" 
+            type="text" 
+            placeholder="https://your-project.supabase.co"
+            class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Supabase Anon Public API Key</label>
+          <input 
+            id="supabase-key-input" 
+            type="password" 
+            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-300">Database Schema Script:</span>
+            <button onclick="UI.downloadDocumentMock('supabase-schema', 'sql')" class="text-emerald-400 hover:underline flex items-center gap-1 font-mono text-[11px]">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> Download schema.sql
+            </button>
+          </div>
+          <p class="text-slate-400 text-[11px]">
+            Run <code class="text-emerald-400">supabase-schema.sql</code> once in your Supabase SQL Editor to auto-create all tables and Row-Level Security policies.
+          </p>
+        </div>
+
+        <div id="supabase-modal-msg" class="hidden text-xs p-3 rounded-xl"></div>
+
+        <div class="flex items-center gap-3 pt-2">
+          <button 
+            type="button" 
+            onclick="UI.disconnectSupabase()" 
+            class="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs">
+            Disconnect
+          </button>
+          <button 
+            type="button" 
+            onclick="UI.saveSupabaseConfig()" 
+            class="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Test & Save Connection</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- 4. SECURITY CLEARANCE CHALLENGE MODAL (PIN Gate)          -->
   <!-- ========================================================= -->
   <div id="security-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
     <div class="w-full max-w-sm rounded-3xl bg-slate-900 border border-amber-500/30 shadow-2xl p-6 relative">
@@ -296,7 +442,7 @@
             class="pin-input w-full py-3 rounded-2xl bg-slate-950 border border-slate-700 text-2xl font-bold text-center text-white focus:outline-none focus:border-amber-500 tracking-widest">
         </div>
 
-        <!-- Interactive PIN Keypad for on-screen clicking or mobile -->
+        <!-- Interactive PIN Keypad -->
         <div class="grid grid-cols-3 gap-2 pt-1">
           <button type="button" onclick="UI.keypadPress('1')" class="keypad-btn py-2.5 rounded-xl text-sm font-bold text-slate-200">1</button>
           <button type="button" onclick="UI.keypadPress('2')" class="keypad-btn py-2.5 rounded-xl text-sm font-bold text-slate-200">2</button>
@@ -338,7 +484,7 @@
   </div>
 
   <!-- ========================================================= -->
-  <!-- 4. COMMAND PALETTE (CTRL + K / SPOTLIGHT SEARCH)          -->
+  <!-- 5. COMMAND PALETTE (CTRL + K / SPOTLIGHT SEARCH)          -->
   <!-- ========================================================= -->
   <div id="command-palette-modal" class="fixed inset-0 z-50 hidden items-start justify-center pt-24 p-4 command-palette-backdrop">
     <div class="w-full max-w-xl rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-fade-in">
@@ -347,7 +493,7 @@
         <input 
           id="command-palette-input" 
           type="text" 
-          placeholder="Type to search projects, clients, modules, or actions..." 
+          placeholder="Type to search projects, clients, employees, documents..." 
           oninput="App.filterCommandPalette(this.value)"
           class="w-full bg-transparent border-none text-white text-sm placeholder-slate-500 focus:outline-none">
         <kbd class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">ESC</kbd>
@@ -357,13 +503,13 @@
       </div>
       <div class="p-3 bg-slate-950/70 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
         <span>Press <kbd class="px-1 py-0.5 rounded bg-slate-800 text-slate-400">↑</kbd> <kbd class="px-1 py-0.5 rounded bg-slate-800 text-slate-400">↓</kbd> to navigate</span>
-        <span>Zeus Intelligent Navigation</span>
+        <span>Zeus Navigation</span>
       </div>
     </div>
   </div>
 
   <!-- ========================================================= -->
-  <!-- 5. GENERIC CREATE / EDIT MODAL                           -->
+  <!-- 6. GENERIC CREATE / EDIT MODAL                           -->
   <!-- ========================================================= -->
   <div id="generic-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
     <div class="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-6 relative max-h-[90vh] overflow-y-auto">
@@ -380,7 +526,7 @@
   </div>
 
   <!-- ========================================================= -->
-  <!-- 6. DOCUMENT PREVIEW MODAL                                -->
+  <!-- 7. DOCUMENT PREVIEW MODAL                                -->
   <!-- ========================================================= -->
   <div id="preview-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
     <div id="preview-modal-content" class="w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden">
@@ -389,7 +535,7 @@
   </div>
 
   <!-- ========================================================= -->
-  <!-- 7. LOGOUT CONFIRMATION MODAL                             -->
+  <!-- 8. LOGOUT CONFIRMATION MODAL                             -->
   <!-- ========================================================= -->
   <div id="logout-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
     <div class="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-6 text-center">
@@ -416,13 +562,14 @@
   </div>
 
   <!-- ========================================================= -->
-  <!-- 8. FLOATING TOAST NOTIFICATION CONTAINER                  -->
+  <!-- 9. FLOATING TOAST NOTIFICATION CONTAINER                 -->
   <!-- ========================================================= -->
   <div id="toast-container" class="fixed bottom-6 right-6 z-50 space-y-2 pointer-events-none flex flex-col items-end">
     <!-- Toasts injected by UI.showToast -->
   </div>
 
   <!-- Application Scripts -->
+  <script src="js/supabase.js"></script>
   <script src="js/store.js"></script>
   <script src="js/security.js"></script>
   <script src="js/auth.js"></script>

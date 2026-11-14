@@ -1,6 +1,7 @@
 /**
  * ZEUS Main Application Controller
- * Handles application lifecycle, routing, command palette (Ctrl+K), and keyboard shortcuts.
+ * Handles application lifecycle, routing, command palette (Ctrl+K), authentication tabs,
+ * and Supabase cloud synchronization.
  */
 
 const App = {
@@ -8,18 +9,17 @@ const App = {
     { id: 'dashboard', label: 'Go to Dashboard', category: 'Navigation', icon: 'layout-dashboard', action: () => UI.navigate('dashboard') },
     { id: 'projects', label: 'Go to Projects Portfolio', category: 'Navigation', icon: 'folder-kanban', action: () => UI.navigate('projects') },
     { id: 'clients', label: 'Go to Clients Directory', category: 'Navigation', icon: 'building-2', action: () => UI.navigate('clients') },
-    { id: 'employees', label: 'Go to Team Directory', category: 'Navigation', icon: 'users', action: () => UI.navigate('employees') },
-    { id: 'past-employees', label: 'Open Employees We Worked With', category: 'Security Restricted', icon: 'user-minus', action: () => UI.navigate('past-employees') },
+    { id: 'employees', label: 'Go to Employees & Alumni', category: 'Navigation', icon: 'users', action: () => UI.navigate('employees') },
     { id: 'documents', label: 'Go to Important Documents', category: 'Navigation', icon: 'file-text', action: () => UI.navigate('documents') },
     { id: 'templates', label: 'Go to Enterprise Templates', category: 'Navigation', icon: 'file-code', action: () => UI.navigate('templates') },
     { id: 'internships', label: 'Go to Internship Pipeline', category: 'Navigation', icon: 'graduation-cap', action: () => UI.navigate('internships') },
     { id: 'credentials', label: 'Open Credentials Vault', category: 'Security Restricted', icon: 'key-round', action: () => UI.navigate('credentials') },
     { id: 'users', label: 'Manage Users & Roles', category: 'Navigation', icon: 'user-check', action: () => UI.navigate('users') },
+    { id: 'supabase-settings', label: 'Configure Supabase Cloud Database', category: 'Database', icon: 'database', action: () => UI.openSupabaseModal() },
     { id: 'add-project', label: 'Create New Project', category: 'Quick Action', icon: 'plus-circle', action: () => UI.openAddProjectModal() },
     { id: 'add-client', label: 'Register New Enterprise Client', category: 'Quick Action', icon: 'plus-circle', action: () => UI.openAddClientModal() },
-    { id: 'add-employee', label: 'Add Team Member', category: 'Quick Action', icon: 'user-plus', action: () => UI.openAddEmployeeModal() },
+    { id: 'add-employee', label: 'Add Person Record', category: 'Quick Action', icon: 'user-plus', action: () => UI.openAddEmployeeModal() },
     { id: 'lock-vault', label: 'Lock Security Vault', category: 'Security', icon: 'lock', action: () => { Security.lock(); UI.render(); } },
-    { id: 'reset-demo', label: 'Restore Demo Data Defaults', category: 'System', icon: 'rotate-ccw', action: () => App.resetAllData() },
     { id: 'logout', label: 'Sign Out / Logout', category: 'System', icon: 'log-out', action: () => App.confirmLogout() }
   ],
 
@@ -29,7 +29,7 @@ const App = {
 
     // 2. Hash Routing
     const initialHash = window.location.hash.replace('#', '');
-    if (initialHash && ['dashboard', 'projects', 'clients', 'employees', 'past-employees', 'documents', 'templates', 'internships', 'credentials', 'users'].includes(initialHash)) {
+    if (initialHash && ['dashboard', 'projects', 'clients', 'employees', 'documents', 'templates', 'internships', 'credentials', 'users'].includes(initialHash)) {
       UI.activeView = initialHash;
     } else {
       UI.activeView = 'dashboard';
@@ -53,29 +53,99 @@ const App = {
     UI.render();
   },
 
+  switchAuthTab(tab) {
+    const regForm = document.getElementById('register-form');
+    const loginForm = document.getElementById('login-form');
+    const tabBtnReg = document.getElementById('tab-btn-register');
+    const tabBtnLogin = document.getElementById('tab-btn-login');
+    const errEl = document.getElementById('auth-error');
+    const succEl = document.getElementById('auth-success');
+
+    if (errEl) errEl.classList.add('hidden');
+    if (succEl) succEl.classList.add('hidden');
+
+    if (tab === 'register') {
+      if (regForm) regForm.classList.remove('hidden');
+      if (loginForm) loginForm.classList.add('hidden');
+      if (tabBtnReg) {
+        tabBtnReg.className = 'flex-1 py-2 rounded-xl text-xs font-bold transition-all bg-indigo-600 text-white shadow-sm flex items-center justify-center gap-1.5';
+      }
+      if (tabBtnLogin) {
+        tabBtnLogin.className = 'flex-1 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-white flex items-center justify-center gap-1.5';
+      }
+    } else {
+      if (regForm) regForm.classList.add('hidden');
+      if (loginForm) loginForm.classList.remove('hidden');
+      if (tabBtnLogin) {
+        tabBtnLogin.className = 'flex-1 py-2 rounded-xl text-xs font-bold transition-all bg-indigo-600 text-white shadow-sm flex items-center justify-center gap-1.5';
+      }
+      if (tabBtnReg) {
+        tabBtnReg.className = 'flex-1 py-2 rounded-xl text-xs font-semibold transition-all text-slate-400 hover:text-white flex items-center justify-center gap-1.5';
+      }
+    }
+  },
+
   bindEvents() {
-    // Login Form Submit
+    // 1. Account Creation (Register) Submit
+    const registerForm = document.getElementById('register-form');
+    if (registerForm) {
+      registerForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('reg-name')?.value;
+        const email = document.getElementById('reg-email')?.value;
+        const role = document.getElementById('reg-role')?.value;
+        const department = document.getElementById('reg-department')?.value;
+        const password = document.getElementById('reg-password')?.value;
+        const confirmPassword = document.getElementById('reg-confirm-password')?.value;
+
+        const errEl = document.getElementById('auth-error');
+        const succEl = document.getElementById('auth-success');
+
+        if (errEl) errEl.classList.add('hidden');
+        if (succEl) succEl.classList.add('hidden');
+
+        const res = await Auth.register({ name, email, password, confirmPassword, role, department });
+        if (res.success) {
+          if (succEl) {
+            succEl.textContent = res.message;
+            succEl.classList.remove('hidden');
+          }
+          UI.showToast(`Welcome to Zeus, ${res.user.name}! Your account is active.`, 'success');
+          setTimeout(() => {
+            UI.activeView = 'dashboard';
+            this.render();
+          }, 600);
+        } else {
+          if (errEl) {
+            errEl.textContent = res.message;
+            errEl.classList.remove('hidden');
+          }
+        }
+      });
+    }
+
+    // 2. Sign In Submit
     const loginForm = document.getElementById('login-form');
     if (loginForm) {
-      loginForm.addEventListener('submit', (e) => {
+      loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const emailInput = document.getElementById('login-email');
         const passInput = document.getElementById('login-password');
-        const errorEl = document.getElementById('login-error');
+        const errEl = document.getElementById('auth-error');
 
         const email = emailInput ? emailInput.value : '';
         const pass = passInput ? passInput.value : '';
 
-        const res = Auth.login(email, pass);
+        const res = await Auth.login(email, pass);
         if (res.success) {
-          if (errorEl) errorEl.classList.add('hidden');
+          if (errEl) errEl.classList.add('hidden');
           UI.showToast(`Welcome back, ${res.user.name}!`, 'success');
           UI.activeView = 'dashboard';
           this.render();
         } else {
-          if (errorEl) {
-            errorEl.textContent = res.message;
-            errorEl.classList.remove('hidden');
+          if (errEl) {
+            errEl.textContent = res.message;
+            errEl.classList.remove('hidden');
           }
           if (emailInput) {
             emailInput.classList.add('border-rose-500');
@@ -84,19 +154,6 @@ const App = {
         }
       });
     }
-
-    // Quick Login Demo Buttons
-    document.querySelectorAll('[data-quick-login]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const brandKey = btn.getAttribute('data-quick-login');
-        const res = Auth.quickLogin(brandKey);
-        if (res.success) {
-          UI.showToast(`Logged in as ${res.user.name} (${res.user.role})`, 'success');
-          UI.activeView = 'dashboard';
-          this.render();
-        }
-      });
-    });
 
     // Security PIN Submission on Enter
     const pinInput = document.getElementById('security-pin-input');
@@ -108,7 +165,7 @@ const App = {
       });
     }
 
-    // Keyboard Shortcuts: Ctrl+K or Cmd+K for Command Palette, Esc to close
+    // Keyboard Shortcuts: Ctrl+K / Cmd+K for Command Palette, Esc to close
     window.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -118,6 +175,7 @@ const App = {
       if (e.key === 'Escape') {
         this.closeCommandPalette();
         UI.closeSecurityModal();
+        UI.closeSupabaseModal();
         UI.closePreviewModal();
         UI.closeGenericModal();
         this.closeLogoutModal();
@@ -170,7 +228,7 @@ const App = {
       return;
     }
 
-    container.innerHTML = filtered.map((cmd, idx) => `
+    container.innerHTML = filtered.map((cmd) => `
       <button 
         onclick="App.executeCommand('${cmd.id}')"
         class="w-full px-3 py-2.5 rounded-xl flex items-center justify-between text-left text-xs transition-colors hover:bg-slate-800 focus:bg-slate-800 group">
@@ -178,7 +236,7 @@ const App = {
           <div class="p-1.5 rounded-lg bg-slate-800 text-slate-400 group-hover:text-indigo-400 group-hover:bg-indigo-500/10">
             <i data-lucide="${cmd.icon}" class="w-4 h-4"></i>
           </div>
-          <span class="font-medium text-slate-200 group-hover:text-white">${cmd.label}</span>
+          <span class="font-medium text-slate-200 group-hover:text-white">${Security.sanitize(cmd.label)}</span>
         </div>
         <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800">${cmd.category}</span>
       </button>
@@ -216,16 +274,6 @@ const App = {
     this.closeLogoutModal();
     Auth.logout();
     UI.showToast('You have been securely logged out.', 'info');
-  },
-
-  // Reset Demo Data
-  resetAllData() {
-    if (confirm('Reset all ZEUS records to clean initial demo state?')) {
-      Store.resetToDefaults();
-      Security.lock();
-      UI.showToast('System data successfully restored to factory defaults.', 'success');
-      this.render();
-    }
   }
 };
 

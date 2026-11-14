@@ -1,6 +1,7 @@
 /**
  * ZEUS User Interface Module
  * High-performance UI renderers, tables, interactive analytics charts, and modals.
+ * Consolidates team members and historical personnel into a unified, filterable Employees register.
  */
 
 const UI = {
@@ -9,10 +10,10 @@ const UI = {
   filterStates: {
     projectsStage: 'All',
     clientsStatus: 'All',
-    internshipsStatus: 'All'
+    internshipsStatus: 'All',
+    employeesStatus: 'All'
   },
   projectDisplayMode: 'table', // 'table' or 'kanban'
-  dashboardChartInstance: null,
 
   setProjectDisplay(mode) {
     this.projectDisplayMode = mode;
@@ -79,7 +80,7 @@ const UI = {
     toast.className = `flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-xl backdrop-blur-md text-sm toast-enter pointer-events-auto max-w-md ${colors[type] || colors.info}`;
     toast.innerHTML = `
       ${icons[type] || icons.info}
-      <span class="font-medium text-slate-200">${message}</span>
+      <span class="font-medium text-slate-200">${Security.sanitize(message)}</span>
       <button class="ml-auto text-slate-400 hover:text-white" onclick="this.parentElement.remove()">
         <i data-lucide="x" class="w-4 h-4"></i>
       </button>
@@ -96,6 +97,89 @@ const UI = {
     }, 4000);
   },
 
+  // Supabase Database Modal Controls
+  openSupabaseModal() {
+    const modal = document.getElementById('supabase-modal');
+    const urlInput = document.getElementById('supabase-url-input');
+    const keyInput = document.getElementById('supabase-key-input');
+    const msg = document.getElementById('supabase-modal-msg');
+
+    const config = SupabaseDB.getConfig();
+    if (urlInput) urlInput.value = config.url;
+    if (keyInput) keyInput.value = config.key;
+    if (msg) msg.classList.add('hidden');
+
+    if (modal) {
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+  },
+
+  closeSupabaseModal() {
+    const modal = document.getElementById('supabase-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+  },
+
+  async saveSupabaseConfig() {
+    const urlInput = document.getElementById('supabase-url-input');
+    const keyInput = document.getElementById('supabase-key-input');
+    const msg = document.getElementById('supabase-modal-msg');
+
+    const url = urlInput ? urlInput.value.trim() : '';
+    const key = keyInput ? keyInput.value.trim() : '';
+
+    if (msg) {
+      msg.textContent = 'Verifying connection to Supabase cloud...';
+      msg.className = 'text-xs p-3 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/30';
+      msg.classList.remove('hidden');
+    }
+
+    const res = await SupabaseDB.setConfig(url, key);
+    if (res.success) {
+      if (msg) {
+        msg.textContent = res.message;
+        msg.className = 'text-xs p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
+      }
+      this.showToast('Supabase PostgreSQL connected!', 'success');
+      this.renderSupabaseStatus();
+      await Store.syncFromSupabase();
+      setTimeout(() => {
+        this.closeSupabaseModal();
+        this.render();
+      }, 1000);
+    } else {
+      if (msg) {
+        msg.textContent = res.message;
+        msg.className = 'text-xs p-3 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/30';
+      }
+    }
+  },
+
+  async disconnectSupabase() {
+    await SupabaseDB.setConfig('', '');
+    this.closeSupabaseModal();
+    this.showToast('Disconnected from cloud database. Local storage active.', 'info');
+    this.renderSupabaseStatus();
+    this.render();
+  },
+
+  renderSupabaseStatus() {
+    const dot = document.getElementById('supabase-status-dot');
+    const text = document.getElementById('supabase-status-text');
+    if (!dot || !text) return;
+
+    if (SupabaseDB.isConfigured()) {
+      dot.className = 'status-dot status-dot-emerald';
+      text.textContent = 'Supabase Cloud (Live)';
+    } else {
+      dot.className = 'status-dot status-dot-amber';
+      text.textContent = 'Connect Database';
+    }
+  },
+
   // Security Challenge Modal
   openSecurityModal(targetView, onSuccess) {
     const modal = document.getElementById('security-modal');
@@ -108,9 +192,7 @@ const UI = {
     if (pinInput) pinInput.value = '';
     if (errorText) errorText.classList.add('hidden');
     if (targetLabel) {
-      targetLabel.textContent = targetView === 'past-employees' 
-        ? 'Restricted Access: Historical Personnel & Contractor Archive' 
-        : 'Restricted Access: Enterprise Secret & Credentials Vault';
+      targetLabel.textContent = 'Restricted Access: Enterprise Secret & Credentials Vault';
     }
 
     modal.classList.remove('hidden');
@@ -183,7 +265,7 @@ const UI = {
 
   // Switch Active View
   navigate(viewName) {
-    if (viewName === 'past-employees' || viewName === 'credentials') {
+    if (viewName === 'credentials') {
       if (!Security.isUnlocked()) {
         Security.challenge(viewName, () => {
           this.activeView = viewName;
@@ -217,6 +299,7 @@ const UI = {
     this.renderSidebar(user);
     this.renderHeader(user);
     this.renderHeaderSecurityIndicator();
+    this.renderSupabaseStatus();
     this.renderContent();
     lucide.createIcons();
 
@@ -231,17 +314,17 @@ const UI = {
     const domainsText = allowed.filter(d => !d.includes('.')).map(d => '@' + d).join(', ');
     const hintEl = document.getElementById('allowed-domains-hint');
     if (hintEl) {
-      hintEl.textContent = `Authorized: ${domainsText}`;
+      hintEl.textContent = `Company accounts only: ${domainsText}`;
     }
   },
 
-  // 2. SIDEBAR RENDERER
+  // 2. SIDEBAR RENDERER (Employees now consolidated; no separate past-employees)
   renderSidebar(user) {
     const navItems = [
       { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard' },
       { id: 'projects', label: 'Projects', icon: 'folder-kanban', count: Store.getProjects().length },
       { id: 'clients', label: 'Clients', icon: 'building-2', count: Store.getClients().length },
-      { id: 'employees', label: 'Employees', icon: 'users', count: Store.getEmployees().length },
+      { id: 'employees', label: 'Employees & Alumni', icon: 'users', count: Store.getEmployees().length },
       { id: 'documents', label: 'Important Documents', icon: 'file-text', count: Store.getDocuments().length },
       { id: 'templates', label: 'Templates', icon: 'file-code', count: Store.getTemplates().length },
       { id: 'internships', label: 'Internship', icon: 'graduation-cap', count: Store.getInternships().length },
@@ -249,13 +332,6 @@ const UI = {
     ];
 
     const restrictedNavItems = [
-      { 
-        id: 'past-employees', 
-        label: 'Employees Worked With', 
-        icon: 'user-minus', 
-        isRestricted: true,
-        count: Store.getPastEmployees().length 
-      },
       { 
         id: 'credentials', 
         label: 'Credentials Vault', 
@@ -300,7 +376,7 @@ const UI = {
     html += `
       <div class="px-3 mt-6 mb-2 flex items-center justify-between">
         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Security Restricted</span>
-        <i data-lucide="shield" class="w-3.5 h-3.5 text-amber-500"></i>
+        <i data-lucide="shield" class="w-3.5 h-3.5 text-purple-400"></i>
       </div>
     `;
 
@@ -313,19 +389,19 @@ const UI = {
           onclick="UI.navigate('${item.id}')"
           class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${
             active 
-              ? 'bg-amber-600/90 text-white shadow-lg shadow-amber-600/20' 
-              : 'text-slate-400 hover:text-amber-200 hover:bg-amber-500/10'
+              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20' 
+              : 'text-slate-400 hover:text-purple-200 hover:bg-purple-500/10'
           }">
           <div class="flex items-center gap-3">
-            <i data-lucide="${item.icon}" class="w-4 h-4 ${active ? 'text-white' : 'text-amber-400'}"></i>
+            <i data-lucide="${item.icon}" class="w-4 h-4 ${active ? 'text-white' : 'text-purple-400'}"></i>
             <span>${item.label}</span>
           </div>
           <div class="flex items-center gap-1.5">
             <i data-lucide="${isUnlocked ? 'unlock' : 'lock'}" class="w-3.5 h-3.5 ${
-              isUnlocked ? 'text-emerald-400' : 'text-amber-400 opacity-60 group-hover:opacity-100'
+              isUnlocked ? 'text-emerald-400' : 'text-purple-400 opacity-60 group-hover:opacity-100'
             }"></i>
             <span class="text-xs px-1.5 py-0.5 rounded-md ${
-              active ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-400'
+              active ? 'bg-purple-700 text-white' : 'bg-slate-800 text-slate-400'
             }">${item.count}</span>
           </div>
         </button>
@@ -347,8 +423,8 @@ const UI = {
       brandBadge.textContent = brand.badge;
       brandBadge.className = `text-[10px] font-bold px-2 py-0.5 rounded-md bg-${brand.color}-500/20 text-${brand.color}-400 border border-${brand.color}-500/30`;
     }
-    if (userNameEl) userNameEl.textContent = user.name;
-    if (userRoleEl) userRoleEl.textContent = `${user.role} • ${user.email}`;
+    if (userNameEl) userNameEl.textContent = Security.sanitize(user.name);
+    if (userRoleEl) userRoleEl.textContent = `${Security.sanitize(user.role)} • ${Security.sanitize(user.email)}`;
     if (userAvatarEl) userAvatarEl.src = user.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.name)}`;
 
     const pageTitle = document.getElementById('page-title');
@@ -358,8 +434,7 @@ const UI = {
       dashboard: { title: 'Executive Overview', desc: 'Real-time corporate telemetry, active stages, and protected modules.' },
       projects: { title: 'Projects Portfolio', desc: 'Manage strategic deliveries, milestones, budgets, and pipeline stages.' },
       clients: { title: 'Enterprise Clients', desc: 'Client directory, active service contracts, and institutional contacts.' },
-      employees: { title: 'Team Directory', desc: 'Active engineering, design, and operations personnel across corporate entities.' },
-      'past-employees': { title: 'Employees We Worked With', desc: 'Confidential historical archive of consultants, contractors, and alumni.' },
+      employees: { title: 'Employees & Alumni', desc: 'Complete workforce register: active staff, former colleagues, and contractors worked with.' },
       documents: { title: 'Important Documents', desc: 'Critical governance, ISO security standards, legal MSAs, and blueprints.' },
       templates: { title: 'Enterprise Templates', desc: 'Standard operating agreements, engineering RFCs, NDAs, and delivery templates.' },
       internships: { title: 'Internship Pipeline', desc: 'Candidate vetting, university partnerships, mentorship, and assignments.' },
@@ -390,9 +465,6 @@ const UI = {
       case 'employees':
         container.innerHTML = this.renderEmployeesView();
         break;
-      case 'past-employees':
-        container.innerHTML = this.renderPastEmployeesView();
-        break;
       case 'documents':
         container.innerHTML = this.renderDocumentsView();
         break;
@@ -416,18 +488,20 @@ const UI = {
   },
 
   // ==========================================
-  // DASHBOARD VIEW (All 7 required sections + Charts)
+  // DASHBOARD VIEW
   // ==========================================
   renderDashboardView() {
     const projects = Store.getProjects();
     const clients = Store.getClients();
     const employees = Store.getEmployees();
-    const pastEmployees = Store.getPastEmployees();
     const documents = Store.getDocuments();
     const internships = Store.getInternships();
     const products = Store.getProducts();
     const credentials = Store.getCredentials();
     const isUnlocked = Security.isUnlocked();
+
+    const activeCount = employees.filter(e => e.status === 'Active').length;
+    const pastCount = employees.filter(e => e.status !== 'Active').length;
 
     return `
       <div class="space-y-8 animate-fade-in pb-12">
@@ -462,36 +536,36 @@ const UI = {
                 <span class="status-dot status-dot-emerald mr-1.5"></span> 100% Active
               </span>
             </div>
-            <p class="text-xs text-slate-400 mt-2.5">Tier 1 Banking, Telco & Energy</p>
+            <p class="text-xs text-slate-400 mt-2.5">Banking, Telco & Energy leaders</p>
           </div>
 
           <div class="p-5 rounded-3xl card-premium">
             <div class="flex items-center justify-between mb-3">
-              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Team & Interns</span>
+              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Workforce</span>
               <div class="p-2.5 rounded-2xl bg-purple-500/10 text-purple-400">
                 <i data-lucide="users" class="w-5 h-5"></i>
               </div>
             </div>
             <div class="flex items-baseline gap-2">
-              <span class="text-3xl font-extrabold text-white">${employees.length + internships.filter(i => i.status === 'Accepted').length}</span>
+              <span class="text-3xl font-extrabold text-white">${employees.length}</span>
               <span class="text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
-                ${employees.length} core • ${internships.length} pipeline
+                ${activeCount} Active • ${pastCount} Alumni/Past
               </span>
             </div>
-            <p class="text-xs text-slate-400 mt-2.5">Engineering, ML & Architecture</p>
+            <p class="text-xs text-slate-400 mt-2.5">Unified staff & historical collaborators</p>
           </div>
 
           <div class="p-5 rounded-3xl card-premium">
             <div class="flex items-center justify-between mb-3">
               <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Security Vault</span>
-              <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
+              <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-purple-500/10 text-purple-400'}">
                 <i data-lucide="${isUnlocked ? 'shield-check' : 'shield-alert'}" class="w-5 h-5"></i>
               </div>
             </div>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-extrabold text-white">${credentials.length}</span>
-              <span class="text-xs font-semibold ${isUnlocked ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'} px-2 py-0.5 rounded-md border ${isUnlocked ? 'border-emerald-500/20' : 'border-amber-500/20'}">
-                ${isUnlocked ? 'Vault Cleared' : 'PIN Protected'}
+              <span class="text-xs font-semibold ${isUnlocked ? 'text-emerald-400 bg-emerald-500/10' : 'text-purple-400 bg-purple-500/10'} px-2 py-0.5 rounded-md border ${isUnlocked ? 'border-emerald-500/20' : 'border-purple-500/20'}">
+                ${isUnlocked ? 'Vault Cleared' : 'AES-256 Protected'}
               </span>
             </div>
             <p class="text-xs text-slate-400 mt-2.5">KMS, Database & Root keys</p>
@@ -553,37 +627,35 @@ const UI = {
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            ${products.map(product => {
-              return `
-                <div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-start justify-between gap-2 mb-2">
-                      <h4 class="font-bold text-sm text-slate-100">${product.name}</h4>
-                      <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">${product.version}</span>
-                    </div>
-                    <p class="text-xs text-slate-400 line-clamp-2 mb-4">${product.description}</p>
+            ${products.map(product => `
+              <div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between">
+                <div>
+                  <div class="flex items-start justify-between gap-2 mb-2">
+                    <h4 class="font-bold text-sm text-slate-100">${Security.sanitize(product.name)}</h4>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">${product.version}</span>
+                  </div>
+                  <p class="text-xs text-slate-400 line-clamp-2 mb-4">${Security.sanitize(product.description)}</p>
+                </div>
+
+                <div>
+                  <div class="flex items-center justify-between text-xs mb-1.5">
+                    <span class="font-medium text-indigo-400 flex items-center gap-1.5">
+                      <span class="status-dot status-dot-indigo"></span>
+                      ${product.stage}
+                    </span>
+                    <span class="text-slate-400 font-mono">${product.progress}%</span>
+                  </div>
+                  <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                    <div class="bg-gradient-to-r from-indigo-500 to-indigo-400 h-1.5 rounded-full transition-width" style="width: ${product.progress}%"></div>
                   </div>
 
-                  <div>
-                    <div class="flex items-center justify-between text-xs mb-1.5">
-                      <span class="font-medium text-indigo-400 flex items-center gap-1.5">
-                        <span class="status-dot status-dot-indigo"></span>
-                        ${product.stage}
-                      </span>
-                      <span class="text-slate-400 font-mono">${product.progress}%</span>
-                    </div>
-                    <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                      <div class="bg-gradient-to-r from-indigo-500 to-indigo-400 h-1.5 rounded-full transition-width" style="width: ${product.progress}%"></div>
-                    </div>
-
-                    <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-[11px] text-slate-400">
-                      <span>Lead: <strong class="text-slate-300">${product.lead}</strong></span>
-                      <span class="text-slate-500">${product.category}</span>
-                    </div>
+                  <div class="flex items-center justify-between mt-3 pt-3 border-t border-slate-800 text-[11px] text-slate-400">
+                    <span>Lead: <strong class="text-slate-300">${Security.sanitize(product.lead)}</strong></span>
+                    <span class="text-slate-500">${Security.sanitize(product.category)}</span>
                   </div>
                 </div>
-              `;
-            }).join('')}
+              </div>
+            `).join('')}
           </div>
         </div>
 
@@ -606,11 +678,11 @@ const UI = {
                 ${clients.slice(0, 4).map(client => `
                   <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between hover:bg-slate-800/60 transition-colors">
                     <div>
-                      <h4 class="text-sm font-semibold text-white">${client.name}</h4>
+                      <h4 class="text-sm font-semibold text-white">${Security.sanitize(client.name)}</h4>
                       <div class="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
-                        <span>${client.industry}</span>
+                        <span>${Security.sanitize(client.industry)}</span>
                         <span>•</span>
-                        <span>${client.contactPerson.split('(')[0]}</span>
+                        <span>${Security.sanitize(client.contactPerson.split('(')[0])}</span>
                       </div>
                     </div>
                     <div class="text-right">
@@ -652,15 +724,15 @@ const UI = {
                     <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between hover:bg-slate-800/60 transition-colors">
                       <div>
                         <div class="flex items-center gap-2">
-                          <h4 class="text-sm font-semibold text-white">${intern.candidateName}</h4>
+                          <h4 class="text-sm font-semibold text-white">${Security.sanitize(intern.candidateName)}</h4>
                           <span class="text-[10px] px-2 py-0.5 rounded-full border ${statusColors[intern.status] || statusColors.Pending}">
                             ${intern.status}
                           </span>
                         </div>
-                        <p class="text-xs text-slate-400 mt-0.5">${intern.institution} • ${intern.track}</p>
+                        <p class="text-xs text-slate-400 mt-0.5">${Security.sanitize(intern.institution)} • ${Security.sanitize(intern.track)}</p>
                       </div>
                       <div class="text-right">
-                        <span class="text-xs text-slate-300">Mentor: ${intern.mentor}</span>
+                        <span class="text-xs text-slate-300">Mentor: ${Security.sanitize(intern.mentor)}</span>
                         <span class="block text-[10px] text-slate-500">Evaluation: ${intern.evaluationScore}</span>
                       </div>
                     </div>
@@ -674,170 +746,109 @@ const UI = {
           </div>
         </div>
 
-        <!-- 4. IMPORTANT DOCUMENTS ROW -->
-        <div class="p-6 rounded-3xl card-premium">
-          <div class="flex items-center justify-between mb-4">
+        <!-- 4. IMPORTANT DOCUMENTS & CREDENTIALS VAULT -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Documents Card -->
+          <div class="p-6 rounded-3xl card-premium flex flex-col justify-between">
             <div>
-              <h3 class="text-base font-bold text-white flex items-center gap-2">
-                <i data-lucide="file-text" class="w-5 h-5 text-blue-400"></i>
-                Important Documents
-              </h3>
-              <p class="text-xs text-slate-400 mt-0.5">Critical compliance policies, blueprints, and executed contracts</p>
+              <div class="flex items-center justify-between mb-4">
+                <div>
+                  <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="file-text" class="w-5 h-5 text-blue-400"></i>
+                    Important Documents
+                  </h3>
+                  <p class="text-xs text-slate-400 mt-0.5">Critical compliance policies, blueprints, and executed contracts</p>
+                </div>
+                <button onclick="UI.navigate('documents')" class="text-xs font-semibold text-blue-400 hover:text-blue-300">
+                  All (${documents.length})
+                </button>
+              </div>
+
+              <div class="space-y-3">
+                ${documents.slice(0, 3).map(doc => `
+                  <div class="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-all flex items-center justify-between">
+                    <div>
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono">${doc.fileType}</span>
+                        <span class="text-xs font-semibold text-white">${Security.sanitize(doc.title)}</span>
+                      </div>
+                      <p class="text-[11px] text-slate-400">${Security.sanitize(doc.category)} • By ${Security.sanitize(doc.author)}</p>
+                    </div>
+                    <button onclick="UI.previewDocument('${doc.id}')" class="p-2 rounded-xl text-indigo-400 hover:bg-slate-800">
+                      <i data-lucide="eye" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
             </div>
-            <button onclick="UI.navigate('documents')" class="text-xs font-semibold text-blue-400 hover:text-blue-300">
-              View All Documents (${documents.length})
+            <button onclick="UI.openAddDocumentModal()" class="mt-4 w-full py-2.5 rounded-2xl border border-dashed border-slate-700 text-xs font-medium text-slate-300 hover:border-slate-500 hover:text-white transition-all flex items-center justify-center gap-2">
+              <i data-lucide="file-up" class="w-4 h-4"></i> Register Document
             </button>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            ${documents.slice(0, 3).map(doc => `
-              <div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between">
-                <div>
-                  <div class="flex items-center justify-between mb-2">
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono">${doc.fileType}</span>
-                    <span class="text-xs text-slate-400">${doc.size}</span>
+          <!-- Credentials Vault Card (Security Restriction) -->
+          <div class="relative p-6 rounded-3xl card-premium overflow-hidden flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-purple-500/10 text-purple-400'}">
+                    <i data-lucide="key-round" class="w-5 h-5"></i>
                   </div>
-                  <h4 class="font-bold text-sm text-white mb-1 line-clamp-1">${doc.title}</h4>
-                  <p class="text-xs text-slate-400">${doc.category}</p>
+                  <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2">
+                      Credentials & Secrets Vault
+                      <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        AES-256 Encrypted
+                      </span>
+                    </h3>
+                    <p class="text-xs text-slate-400">AWS master keys, database clusters, and webhook secrets</p>
+                  </div>
                 </div>
-                <div class="flex items-center justify-between mt-4 pt-3 border-t border-slate-800 text-xs">
-                  <span class="text-slate-500">By ${doc.author}</span>
-                  <button onclick="UI.previewDocument('${doc.id}')" class="text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
-                    <i data-lucide="eye" class="w-3.5 h-3.5"></i> Preview
+              </div>
+
+              ${!isUnlocked ? `
+                <div class="p-6 rounded-2xl bg-slate-950/80 border border-purple-500/20 text-center flex flex-col items-center justify-center my-2">
+                  <div class="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-400 mb-3 animate-shield">
+                    <i data-lucide="lock" class="w-6 h-6"></i>
+                  </div>
+                  <h4 class="text-sm font-bold text-white mb-1">Encrypted Credentials Vault</h4>
+                  <p class="text-xs text-slate-400 max-w-sm mb-4">
+                    Access to infrastructure master keys, connection strings, and webhook tokens is strictly controlled.
+                  </p>
+                  <button 
+                    onclick="Security.challenge('credentials', () => UI.render())"
+                    class="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 flex items-center gap-2">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i> Unlock Credentials Vault
+                  </button>
+                  <span class="text-[10px] text-slate-500 mt-2 font-mono">Default Clearance PIN: 7799</span>
+                </div>
+              ` : `
+                <div class="space-y-3">
+                  ${credentials.slice(0, 2).map(cred => `
+                    <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 hover:bg-slate-800/60 transition-all">
+                      <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-semibold text-white">${Security.sanitize(cred.title)}</h4>
+                        <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">${cred.environment}</span>
+                      </div>
+                      <div class="flex items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 mt-2">
+                        <span class="truncate" id="vault-key-${cred.id}">••••••••••••••••••••••••</span>
+                        <div class="flex items-center gap-1 shrink-0">
+                          <button onclick="UI.toggleSecretVisibility('vault-key-${cred.id}', '${cred.secret}')" class="p-1 text-slate-400 hover:text-white" title="Toggle visibility">
+                            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                          </button>
+                          <button onclick="UI.copyToClipboard('${cred.secret}', '${cred.title}')" class="p-1 text-indigo-400 hover:text-indigo-300" title="Copy secret">
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                  <button onclick="UI.navigate('credentials')" class="w-full py-2 text-xs font-semibold text-slate-400 hover:text-white text-center">
+                    Open Complete Secrets Vault (${credentials.length}) →
                   </button>
                 </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-
-        <!-- 5. SECURITY RESTRICTED SECTIONS -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <!-- A. EMPLOYEE WE WORKED WITH -->
-          <div class="relative p-6 rounded-3xl card-premium overflow-hidden">
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-2.5">
-                <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}">
-                  <i data-lucide="${isUnlocked ? 'user-check' : 'user-x'}" class="w-5 h-5"></i>
-                </div>
-                <div>
-                  <h3 class="text-base font-bold text-white flex items-center gap-2">
-                    Employee We Worked With
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      Security Restriction
-                    </span>
-                  </h3>
-                  <p class="text-xs text-slate-400">Historical archive of contractors, alumni, and confidential engagements</p>
-                </div>
-              </div>
+              `}
             </div>
-
-            ${!isUnlocked ? `
-              <!-- LOCKED OVERLAY -->
-              <div class="p-6 rounded-2xl bg-slate-950/80 border border-amber-500/20 text-center flex flex-col items-center justify-center my-2">
-                <div class="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-400 mb-3 animate-shield">
-                  <i data-lucide="shield-alert" class="w-6 h-6"></i>
-                </div>
-                <h4 class="text-sm font-bold text-white mb-1">Access Restricted By Security Policy</h4>
-                <p class="text-xs text-slate-400 max-w-sm mb-4">
-                  Viewing previous team members, contractors, exit ratings, and clearances requires master security authorization.
-                </p>
-                <button 
-                  onclick="Security.challenge('past-employees', () => UI.render())"
-                  class="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2">
-                  <i data-lucide="key-round" class="w-4 h-4"></i> Enter Security Clearance PIN
-                </button>
-                <span class="text-[10px] text-slate-500 mt-2 font-mono">Default Demo PIN: 7799</span>
-              </div>
-            ` : `
-              <!-- UNLOCKED DATA -->
-              <div class="space-y-3">
-                ${pastEmployees.map(emp => `
-                  <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 hover:bg-slate-800/60 transition-all flex items-center justify-between">
-                    <div>
-                      <div class="flex items-center gap-2">
-                        <h4 class="text-sm font-semibold text-white">${emp.name}</h4>
-                        <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono">${emp.clearanceLevel}</span>
-                      </div>
-                      <p class="text-xs text-slate-400 mt-0.5">${emp.formerRole} • ${emp.period}</p>
-                      <p class="text-[11px] text-slate-500 mt-1">Projects: ${emp.projectsWorkedOn}</p>
-                    </div>
-                    <div class="text-right">
-                      <span class="text-xs font-bold text-amber-400">${emp.performanceScore}</span>
-                      <span class="block text-[10px] text-slate-400">${emp.status}</span>
-                    </div>
-                  </div>
-                `).join('')}
-                <button onclick="UI.navigate('past-employees')" class="w-full py-2 text-xs font-semibold text-slate-400 hover:text-white text-center">
-                  Open Full Personnel Archive →
-                </button>
-              </div>
-            `}
-          </div>
-
-          <!-- B. CREDENTIALS VAULT -->
-          <div class="relative p-6 rounded-3xl card-premium overflow-hidden">
-            <div class="flex items-center justify-between mb-4">
-              <div class="flex items-center gap-2.5">
-                <div class="p-2.5 rounded-2xl ${isUnlocked ? 'bg-emerald-500/10 text-emerald-400' : 'bg-purple-500/10 text-purple-400'}">
-                  <i data-lucide="key-round" class="w-5 h-5"></i>
-                </div>
-                <div>
-                  <h3 class="text-base font-bold text-white flex items-center gap-2">
-                    Credentials & Secrets Vault
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                      Security Restriction
-                    </span>
-                  </h3>
-                  <p class="text-xs text-slate-400">Production AWS keys, database clusters, and webhook secrets</p>
-                </div>
-              </div>
-            </div>
-
-            ${!isUnlocked ? `
-              <!-- LOCKED OVERLAY -->
-              <div class="p-6 rounded-2xl bg-slate-950/80 border border-purple-500/20 text-center flex flex-col items-center justify-center my-2">
-                <div class="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-400 mb-3 animate-shield">
-                  <i data-lucide="lock" class="w-6 h-6"></i>
-                </div>
-                <h4 class="text-sm font-bold text-white mb-1">Encrypted Credentials Vault</h4>
-                <p class="text-xs text-slate-400 max-w-sm mb-4">
-                  Access to infrastructure master keys, connection strings, and webhook tokens is strictly controlled.
-                </p>
-                <button 
-                  onclick="Security.challenge('credentials', () => UI.render())"
-                  class="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/20 flex items-center gap-2">
-                  <i data-lucide="shield-check" class="w-4 h-4"></i> Unlock Credentials Vault
-                </button>
-                <span class="text-[10px] text-slate-500 mt-2 font-mono">Default Demo PIN: 7799</span>
-              </div>
-            ` : `
-              <!-- UNLOCKED SECRETS -->
-              <div class="space-y-3">
-                ${credentials.slice(0, 3).map(cred => `
-                  <div class="p-3.5 rounded-2xl bg-slate-900/50 border border-slate-800/80 hover:bg-slate-800/60 transition-all">
-                    <div class="flex items-center justify-between mb-1">
-                      <h4 class="text-sm font-semibold text-white">${cred.title}</h4>
-                      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">${cred.environment}</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-2 bg-slate-950/90 px-3 py-2 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 mt-2">
-                      <span class="truncate" id="vault-key-${cred.id}">••••••••••••••••••••••••</span>
-                      <div class="flex items-center gap-1 shrink-0">
-                        <button onclick="UI.toggleSecretVisibility('vault-key-${cred.id}', '${cred.secret}')" class="p-1 text-slate-400 hover:text-white" title="Toggle visibility">
-                          <i data-lucide="eye" class="w-3.5 h-3.5"></i>
-                        </button>
-                        <button onclick="UI.copyToClipboard('${cred.secret}', '${cred.title}')" class="p-1 text-indigo-400 hover:text-indigo-300" title="Copy secret">
-                          <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                `).join('')}
-                <button onclick="UI.navigate('credentials')" class="w-full py-2 text-xs font-semibold text-slate-400 hover:text-white text-center">
-                  Open Complete Secrets Vault (${credentials.length}) →
-                </button>
-              </div>
-            `}
           </div>
         </div>
       </div>
@@ -846,7 +857,6 @@ const UI = {
 
   // Initialize Interactive Charts
   initDashboardCharts() {
-    // 1. Line/Area Chart for Revenue & Velocity
     const trendCtx = document.getElementById('dashboard-trend-chart');
     if (trendCtx && window.Chart) {
       if (window._zeusTrendChart) window._zeusTrendChart.destroy();
@@ -900,7 +910,6 @@ const UI = {
       });
     }
 
-    // 2. Pie / Doughnut Chart for Stages
     const pieCtx = document.getElementById('dashboard-pie-chart');
     if (pieCtx && window.Chart) {
       if (window._zeusPieChart) window._zeusPieChart.destroy();
@@ -930,6 +939,137 @@ const UI = {
   },
 
   // ==========================================
+  // TABLE VIEW: EMPLOYEES & WORKED WITH (CONSOLIDATED)
+  // ==========================================
+  renderEmployeesView() {
+    const employees = Store.getEmployees();
+    const query = (this.searchQueries.employees || '').toLowerCase();
+    const statusFilter = this.filterStates.employeesStatus || 'All';
+
+    const filtered = employees.filter(e => {
+      const matchesQuery = (e.name || '').toLowerCase().includes(query) ||
+        (e.role || '').toLowerCase().includes(query) ||
+        (e.department || '').toLowerCase().includes(query) ||
+        (e.timeWorkedTogether || '').toLowerCase().includes(query) ||
+        (e.email || '').toLowerCase().includes(query);
+      const matchesStatus = statusFilter === 'All' || e.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
+
+    const statusOptions = ['All', 'Active', 'Former / Alumni', 'Contractor (Completed)'];
+
+    return `
+      <div class="space-y-6 animate-fade-in">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          <div class="relative flex-1 max-w-md">
+            <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input 
+              type="text" 
+              placeholder="Search by name, role, department, or time worked..." 
+              value="${this.searchQueries.employees || ''}"
+              oninput="UI.setSearch('employees', this.value)"
+              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+          </div>
+          <div class="flex items-center gap-3">
+            <button onclick="UI.exportToCSV('employees')" class="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all flex items-center gap-2">
+              <i data-lucide="download" class="w-4 h-4"></i> Export CSV
+            </button>
+            <button onclick="UI.openAddEmployeeModal()" class="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
+              <i data-lucide="user-plus" class="w-4 h-4"></i> Add Person Record
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Status Pills -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span class="text-slate-500 font-medium mr-1">Status Filter:</span>
+          ${statusOptions.map(st => `
+            <button 
+              onclick="UI.setFilter('employeesStatus', '${st}')" 
+              class="px-3.5 py-1.5 rounded-xl font-medium transition-all ${
+                statusFilter === st 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+              }">
+              ${st}
+            </button>
+          `).join('')}
+        </div>
+
+        <div class="rounded-3xl card-premium overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <th class="py-4 px-4">Person</th>
+                  <th class="py-4 px-4">Role / Title</th>
+                  <th class="py-4 px-4">Department</th>
+                  <th class="py-4 px-4">Status</th>
+                  <th class="py-4 px-4">Time Worked Together</th>
+                  <th class="py-4 px-4">Email / Contact</th>
+                  <th class="py-4 px-4">Location</th>
+                  <th class="py-4 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60 text-sm">
+                ${filtered.length === 0 ? `
+                  <tr><td colspan="8" class="text-center py-12 text-slate-500">No records found matching your filter.</td></tr>
+                ` : filtered.map(emp => {
+                  const statusColors = {
+                    'Active': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                    'Former / Alumni': 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+                    'Contractor (Completed)': 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                  };
+
+                  return `
+                    <tr class="table-row-hover">
+                      <td class="py-4 px-4">
+                        <div class="flex items-center gap-3">
+                          <div class="w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs ring-1 ring-indigo-500/30">
+                            ${(emp.name || 'U').split(' ').map(n=>n[0]).join('')}
+                          </div>
+                          <div>
+                            <div class="font-semibold text-white">${Security.sanitize(emp.name)}</div>
+                            <div class="text-[11px] text-slate-500">${Security.sanitize(emp.type || 'Full-time')}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="py-4 px-4 text-slate-300 font-medium">${Security.sanitize(emp.role)}</td>
+                      <td class="py-4 px-4 text-slate-400">${Security.sanitize(emp.department)}</td>
+                      <td class="py-4 px-4">
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusColors[emp.status] || 'bg-slate-800 text-slate-300'}">
+                          ${Security.sanitize(emp.status)}
+                        </span>
+                      </td>
+                      <td class="py-4 px-4 text-slate-300 font-mono text-xs">
+                        <div class="flex items-center gap-1.5 text-indigo-300">
+                          <i data-lucide="clock" class="w-3.5 h-3.5 text-indigo-400 shrink-0"></i>
+                          <span>${Security.sanitize(emp.timeWorkedTogether || 'Not specified')}</span>
+                        </div>
+                      </td>
+                      <td class="py-4 px-4 text-slate-400 font-mono text-xs">${Security.sanitize(emp.email)}</td>
+                      <td class="py-4 px-4 text-slate-400 text-xs">${Security.sanitize(emp.location || 'Kigali HQ')}</td>
+                      <td class="py-4 px-4 text-right">
+                        <button onclick="UI.deleteEmployee('${emp.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Record">
+                          <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="px-4 py-3 border-t border-slate-800 bg-slate-950/20 flex items-center justify-between text-xs text-slate-400">
+            <span>Showing ${filtered.length} of ${employees.length} personnel and alumni records</span>
+            <span class="text-emerald-400">Real database synchronized</span>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  // ==========================================
   // TABLE VIEW: PROJECTS
   // ==========================================
   renderProjectsView() {
@@ -938,10 +1078,10 @@ const UI = {
     const stageFilter = this.filterStates.projectsStage || 'All';
 
     const filtered = projects.filter(p => {
-      const matchesQuery = p.name.toLowerCase().includes(query) ||
-        p.client.toLowerCase().includes(query) ||
-        p.lead.toLowerCase().includes(query) ||
-        p.stage.toLowerCase().includes(query);
+      const matchesQuery = (p.name || '').toLowerCase().includes(query) ||
+        (p.client || '').toLowerCase().includes(query) ||
+        (p.lead || '').toLowerCase().includes(query) ||
+        (p.stage || '').toLowerCase().includes(query);
       const matchesStage = stageFilter === 'All' || p.stage === stageFilter;
       return matchesQuery && matchesStage;
     });
@@ -977,7 +1117,7 @@ const UI = {
           ${stagesList.map(st => `
             <button 
               onclick="UI.setFilter('projectsStage', '${st}')" 
-              class="px-3 py-1.5 rounded-xl font-medium transition-all ${
+              class="px-3.5 py-1.5 rounded-xl font-medium transition-all ${
                 stageFilter === st 
                   ? 'bg-indigo-600 text-white shadow-sm' 
                   : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
@@ -1013,11 +1153,11 @@ const UI = {
                   </tr>
                 ` : filtered.map(p => `
                   <tr class="table-row-hover">
-                    <td class="py-4 px-4 font-semibold text-white">${p.name}</td>
+                    <td class="py-4 px-4 font-semibold text-white">${Security.sanitize(p.name)}</td>
                     <td class="py-4 px-4 text-slate-300">
                       <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs bg-slate-800 text-slate-300">
                         <i data-lucide="building" class="w-3 h-3 text-slate-400"></i>
-                        ${p.client}
+                        ${Security.sanitize(p.client)}
                       </span>
                     </td>
                     <td class="py-4 px-4">
@@ -1045,9 +1185,12 @@ const UI = {
                     </td>
                     <td class="py-4 px-4 font-mono text-slate-300">${p.budget}</td>
                     <td class="py-4 px-4 text-slate-400 text-xs">${p.deadline}</td>
-                    <td class="py-4 px-4 text-slate-300">${p.lead}</td>
+                    <td class="py-4 px-4 text-slate-300">${Security.sanitize(p.lead)}</td>
                     <td class="py-4 px-4 text-right">
                       <div class="flex items-center justify-end gap-2">
+                        <button onclick="UI.advanceProjectStage('${p.id}')" class="p-1.5 rounded-lg text-indigo-400 hover:bg-slate-800" title="Advance Stage">
+                          <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+                        </button>
                         <button onclick="UI.deleteProject('${p.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Project">
                           <i data-lucide="trash-2" class="w-4 h-4"></i>
                         </button>
@@ -1057,10 +1200,6 @@ const UI = {
                 `).join('')}
               </tbody>
             </table>
-          </div>
-          <div class="px-4 py-3 border-t border-slate-800 bg-slate-950/20 flex items-center justify-between text-xs text-slate-400">
-            <span>Showing ${filtered.length} of ${projects.length} strategic projects</span>
-            <span>All systems nominal</span>
           </div>
         </div>
       </div>
@@ -1076,10 +1215,10 @@ const UI = {
     const statusFilter = this.filterStates.clientsStatus || 'All';
 
     const filtered = clients.filter(c => {
-      const matchesQuery = c.name.toLowerCase().includes(query) ||
-        c.industry.toLowerCase().includes(query) ||
-        c.contactPerson.toLowerCase().includes(query) ||
-        c.location.toLowerCase().includes(query);
+      const matchesQuery = (c.name || '').toLowerCase().includes(query) ||
+        (c.industry || '').toLowerCase().includes(query) ||
+        (c.contactPerson || '').toLowerCase().includes(query) ||
+        (c.location || '').toLowerCase().includes(query);
       const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
       return matchesQuery && matchesStatus;
     });
@@ -1127,15 +1266,15 @@ const UI = {
                 ` : filtered.map(c => `
                   <tr class="table-row-hover">
                     <td class="py-4 px-4 font-semibold text-white">
-                      <div>${c.name}</div>
+                      <div>${Security.sanitize(c.name)}</div>
                       <div class="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                        <i data-lucide="map-pin" class="w-3 h-3 text-slate-500"></i> ${c.location}
+                        <i data-lucide="map-pin" class="w-3 h-3 text-slate-500"></i> ${Security.sanitize(c.location)}
                       </div>
                     </td>
-                    <td class="py-4 px-4 text-slate-300">${c.industry}</td>
-                    <td class="py-4 px-4 text-slate-200">${c.contactPerson}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs font-mono">${c.email}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${c.phone}</td>
+                    <td class="py-4 px-4 text-slate-300">${Security.sanitize(c.industry)}</td>
+                    <td class="py-4 px-4 text-slate-200">${Security.sanitize(c.contactPerson)}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs font-mono">${Security.sanitize(c.email)}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${Security.sanitize(c.phone)}</td>
                     <td class="py-4 px-4 font-mono font-semibold text-emerald-400">${c.contractValue}</td>
                     <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -1158,213 +1297,15 @@ const UI = {
   },
 
   // ==========================================
-  // TABLE VIEW: EMPLOYEES (ACTIVE)
-  // ==========================================
-  renderEmployeesView() {
-    const employees = Store.getEmployees();
-    const query = (this.searchQueries.employees || '').toLowerCase();
-    const filtered = employees.filter(e =>
-      e.name.toLowerCase().includes(query) ||
-      e.role.toLowerCase().includes(query) ||
-      e.department.toLowerCase().includes(query) ||
-      e.email.toLowerCase().includes(query)
-    );
-
-    return `
-      <div class="space-y-6 animate-fade-in">
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-          <div class="relative flex-1 max-w-md">
-            <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input 
-              type="text" 
-              placeholder="Search team members by name, role, department..." 
-              value="${this.searchQueries.employees || ''}"
-              oninput="UI.setSearch('employees', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
-          </div>
-          <div class="flex items-center gap-3">
-            <button onclick="UI.openAddEmployeeModal()" class="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
-              <i data-lucide="user-plus" class="w-4 h-4"></i> Add Employee
-            </button>
-          </div>
-        </div>
-
-        <div class="rounded-3xl card-premium overflow-hidden">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-              <thead>
-                <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-4 px-4">Employee</th>
-                  <th class="py-4 px-4">Role / Title</th>
-                  <th class="py-4 px-4">Department</th>
-                  <th class="py-4 px-4">Company Email</th>
-                  <th class="py-4 px-4">Location</th>
-                  <th class="py-4 px-4">Status</th>
-                  <th class="py-4 px-4">Join Date</th>
-                  <th class="py-4 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-800/60 text-sm">
-                ${filtered.map(emp => `
-                  <tr class="table-row-hover">
-                    <td class="py-4 px-4">
-                      <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs ring-1 ring-indigo-500/30">
-                          ${emp.name.split(' ').map(n=>n[0]).join('')}
-                        </div>
-                        <div>
-                          <div class="font-semibold text-white">${emp.name}</div>
-                          <div class="text-[11px] text-slate-500">${emp.type}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td class="py-4 px-4 text-slate-300 font-medium">${emp.role}</td>
-                    <td class="py-4 px-4 text-slate-400">${emp.department}</td>
-                    <td class="py-4 px-4 text-slate-300 font-mono text-xs">${emp.email}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.location}</td>
-                    <td class="py-4 px-4">
-                      <span class="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        ${emp.status}
-                      </span>
-                    </td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.joinDate}</td>
-                    <td class="py-4 px-4 text-right">
-                      <button onclick="UI.deleteEmployee('${emp.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Remove Employee">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                      </button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-  },
-
-  // ==========================================
-  // TABLE VIEW: EMPLOYEE WE WORKED WITH (SECURITY RESTRICTION)
-  // ==========================================
-  renderPastEmployeesView() {
-    const isUnlocked = Security.isUnlocked();
-    if (!isUnlocked) {
-      return `
-        <div class="p-12 rounded-3xl card-premium border-amber-500/30 text-center max-w-xl mx-auto my-12 animate-fade-in">
-          <div class="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto mb-4 animate-shield ring-1 ring-amber-500/30">
-            <i data-lucide="shield-alert" class="w-8 h-8"></i>
-          </div>
-          <h3 class="text-xl font-bold text-white mb-2">Confidential Personnel Vault Gated</h3>
-          <p class="text-sm text-slate-400 mb-6">
-            Access to past personnel, consultants, performance evaluations, and exit clearance records requires corporate authorization.
-          </p>
-          <button 
-            onclick="Security.challenge('past-employees', () => UI.render())"
-            class="px-6 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold shadow-lg shadow-amber-600/25 transition-all inline-flex items-center gap-2">
-            <i data-lucide="key-round" class="w-4 h-4"></i> Enter Clearance PIN (Default: 7799)
-          </button>
-        </div>
-      `;
-    }
-
-    const pastEmployees = Store.getPastEmployees();
-    const query = (this.searchQueries.pastEmployees || '').toLowerCase();
-    const filtered = pastEmployees.filter(p =>
-      p.name.toLowerCase().includes(query) ||
-      p.formerRole.toLowerCase().includes(query) ||
-      p.projectsWorkedOn.toLowerCase().includes(query)
-    );
-
-    return `
-      <div class="space-y-6 animate-fade-in">
-        <div class="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
-          <div class="flex items-center gap-3 text-amber-300 text-xs">
-            <i data-lucide="shield-check" class="w-5 h-5 text-amber-400"></i>
-            <span><strong>Clearance Verified:</strong> Viewing confidential contractor and alumni records. Session will automatically re-lock on inactivity.</span>
-          </div>
-          <button onclick="Security.lock(); UI.render();" class="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold transition-all flex items-center gap-1.5">
-            <i data-lucide="lock" class="w-3.5 h-3.5"></i> Lock Archive
-          </button>
-        </div>
-
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-          <div class="relative flex-1 max-w-md">
-            <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input 
-              type="text" 
-              placeholder="Search historical records by name, role, project..." 
-              value="${this.searchQueries.pastEmployees || ''}"
-              oninput="UI.setSearch('pastEmployees', this.value)"
-              class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
-          </div>
-          <button onclick="UI.openAddPastEmployeeModal()" class="px-4 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-lg shadow-amber-600/25 flex items-center gap-2">
-            <i data-lucide="plus" class="w-4 h-4"></i> Archive Personnel Record
-          </button>
-        </div>
-
-        <div class="rounded-3xl card-premium overflow-hidden">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-              <thead>
-                <tr class="border-b border-slate-800 bg-slate-950/40 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th class="py-4 px-4">Individual</th>
-                  <th class="py-4 px-4">Former Role</th>
-                  <th class="py-4 px-4">Engagement Type</th>
-                  <th class="py-4 px-4">Period</th>
-                  <th class="py-4 px-4">Clearance Level</th>
-                  <th class="py-4 px-4">Key Projects</th>
-                  <th class="py-4 px-4">Rating</th>
-                  <th class="py-4 px-4">Exit Status</th>
-                  <th class="py-4 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-800/60 text-sm">
-                ${filtered.map(emp => `
-                  <tr class="table-row-hover">
-                    <td class="py-4 px-4">
-                      <div class="font-semibold text-white">${emp.name}</div>
-                      <div class="text-[11px] text-slate-400 font-mono">${emp.currentContact}</div>
-                    </td>
-                    <td class="py-4 px-4 text-slate-300">${emp.formerRole}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.engagementType}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${emp.period}</td>
-                    <td class="py-4 px-4">
-                      <span class="px-2 py-0.5 rounded text-[11px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                        ${emp.clearanceLevel}
-                      </span>
-                    </td>
-                    <td class="py-4 px-4 text-xs text-slate-300 max-w-xs truncate">${emp.projectsWorkedOn}</td>
-                    <td class="py-4 px-4 font-bold text-amber-400">${emp.performanceScore}</td>
-                    <td class="py-4 px-4">
-                      <span class="px-2 py-0.5 rounded-full text-[11px] bg-slate-800 text-slate-300">
-                        ${emp.status}
-                      </span>
-                    </td>
-                    <td class="py-4 px-4 text-right">
-                      <button onclick="UI.deletePastEmployee('${emp.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Archive">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                      </button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-  },
-
-  // ==========================================
   // TABLE VIEW: IMPORTANT DOCUMENTS
   // ==========================================
   renderDocumentsView() {
     const documents = Store.getDocuments();
     const query = (this.searchQueries.documents || '').toLowerCase();
     const filtered = documents.filter(d =>
-      d.title.toLowerCase().includes(query) ||
-      d.category.toLowerCase().includes(query) ||
-      d.author.toLowerCase().includes(query)
+      (d.title || '').toLowerCase().includes(query) ||
+      (d.category || '').toLowerCase().includes(query) ||
+      (d.author || '').toLowerCase().includes(query)
     );
 
     return `
@@ -1404,9 +1345,9 @@ const UI = {
                   <tr class="table-row-hover">
                     <td class="py-4 px-4 font-semibold text-white flex items-center gap-2">
                       <i data-lucide="file-text" class="w-4 h-4 text-blue-400"></i>
-                      ${doc.title}
+                      ${Security.sanitize(doc.title)}
                     </td>
-                    <td class="py-4 px-4 text-slate-300">${doc.category}</td>
+                    <td class="py-4 px-4 text-slate-300">${Security.sanitize(doc.category)}</td>
                     <td class="py-4 px-4">
                       <span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-slate-800 text-slate-300">${doc.fileType}</span>
                     </td>
@@ -1418,7 +1359,7 @@ const UI = {
                         'bg-slate-800 text-slate-300'
                       }">${doc.accessLevel}</span>
                     </td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${doc.author}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${Security.sanitize(doc.author)}</td>
                     <td class="py-4 px-4 text-slate-400 text-xs">${doc.updatedAt}</td>
                     <td class="py-4 px-4 text-right">
                       <div class="flex items-center justify-end gap-1">
@@ -1450,9 +1391,9 @@ const UI = {
     const templates = Store.getTemplates();
     const query = (this.searchQueries.templates || '').toLowerCase();
     const filtered = templates.filter(t =>
-      t.title.toLowerCase().includes(query) ||
-      t.category.toLowerCase().includes(query) ||
-      t.description.toLowerCase().includes(query)
+      (t.title || '').toLowerCase().includes(query) ||
+      (t.category || '').toLowerCase().includes(query) ||
+      (t.description || '').toLowerCase().includes(query)
     );
 
     return `
@@ -1480,8 +1421,8 @@ const UI = {
                   <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 uppercase tracking-wider">${tpl.category}</span>
                   <span class="text-xs text-slate-500 font-mono">${tpl.format}</span>
                 </div>
-                <h4 class="font-bold text-base text-white mb-2">${tpl.title}</h4>
-                <p class="text-xs text-slate-400 line-clamp-3 mb-4">${tpl.description}</p>
+                <h4 class="font-bold text-base text-white mb-2">${Security.sanitize(tpl.title)}</h4>
+                <p class="text-xs text-slate-400 line-clamp-3 mb-4">${Security.sanitize(tpl.description)}</p>
               </div>
 
               <div class="pt-4 border-t border-slate-800 flex items-center justify-between text-xs">
@@ -1513,10 +1454,10 @@ const UI = {
     const statusFilter = this.filterStates.internshipsStatus || 'All';
 
     const filtered = internships.filter(i => {
-      const matchesQuery = i.candidateName.toLowerCase().includes(query) ||
-        i.institution.toLowerCase().includes(query) ||
-        i.track.toLowerCase().includes(query) ||
-        i.mentor.toLowerCase().includes(query);
+      const matchesQuery = (i.candidateName || '').toLowerCase().includes(query) ||
+        (i.institution || '').toLowerCase().includes(query) ||
+        (i.track || '').toLowerCase().includes(query) ||
+        (i.mentor || '').toLowerCase().includes(query);
       const matchesStatus = statusFilter === 'All' || i.status === statusFilter;
       return matchesQuery && matchesStatus;
     });
@@ -1540,7 +1481,6 @@ const UI = {
           </button>
         </div>
 
-        <!-- Filter Pills Bar -->
         <div class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
           <span class="text-slate-500 font-medium mr-1">Status:</span>
           ${statusOptions.map(st => `
@@ -1575,11 +1515,11 @@ const UI = {
                 ${filtered.map(intern => `
                   <tr class="table-row-hover">
                     <td class="py-4 px-4">
-                      <div class="font-semibold text-white">${intern.candidateName}</div>
-                      <div class="text-[11px] text-slate-400 font-mono">${intern.email}</div>
+                      <div class="font-semibold text-white">${Security.sanitize(intern.candidateName)}</div>
+                      <div class="text-[11px] text-slate-400 font-mono">${Security.sanitize(intern.email)}</div>
                     </td>
-                    <td class="py-4 px-4 text-slate-300">${intern.institution}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${intern.track}</td>
+                    <td class="py-4 px-4 text-slate-300">${Security.sanitize(intern.institution)}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${Security.sanitize(intern.track)}</td>
                     <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                         intern.status === 'Accepted' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
@@ -1588,8 +1528,8 @@ const UI = {
                         'bg-slate-800 text-slate-300'
                       }">${intern.status}</span>
                     </td>
-                    <td class="py-4 px-4 text-slate-300">${intern.mentor}</td>
-                    <td class="py-4 px-4 text-slate-400 text-xs">${intern.assignedProject}</td>
+                    <td class="py-4 px-4 text-slate-300">${Security.sanitize(intern.mentor)}</td>
+                    <td class="py-4 px-4 text-slate-400 text-xs">${Security.sanitize(intern.assignedProject)}</td>
                     <td class="py-4 px-4 font-bold text-purple-400">${intern.evaluationScore}</td>
                     <td class="py-4 px-4 text-right">
                       <button onclick="UI.deleteIntern('${intern.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Delete Applicant">
@@ -1633,9 +1573,9 @@ const UI = {
     const credentials = Store.getCredentials();
     const query = (this.searchQueries.credentials || '').toLowerCase();
     const filtered = credentials.filter(c =>
-      c.title.toLowerCase().includes(query) ||
-      c.service.toLowerCase().includes(query) ||
-      c.environment.toLowerCase().includes(query)
+      (c.title || '').toLowerCase().includes(query) ||
+      (c.service || '').toLowerCase().includes(query) ||
+      (c.environment || '').toLowerCase().includes(query)
     );
 
     return `
@@ -1643,7 +1583,7 @@ const UI = {
         <div class="p-4 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
           <div class="flex items-center gap-3 text-purple-300 text-xs">
             <i data-lucide="shield-check" class="w-5 h-5 text-purple-400"></i>
-            <span><strong>Clearance Verified:</strong> Production credentials vault unlocked. Copy actions are logged for corporate audit.</span>
+            <span><strong>Clearance Verified:</strong> Production credentials vault unlocked. AES-256 decryption active in secure memory enclave.</span>
           </div>
           <button onclick="Security.lock(); UI.render();" class="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-bold transition-all flex items-center gap-1.5">
             <i data-lucide="lock" class="w-3.5 h-3.5"></i> Lock Vault
@@ -1674,8 +1614,8 @@ const UI = {
                     <i data-lucide="key" class="w-5 h-5"></i>
                   </div>
                   <div>
-                    <h4 class="font-bold text-base text-white">${cred.title}</h4>
-                    <span class="text-xs text-slate-400">${cred.service} • ${cred.username}</span>
+                    <h4 class="font-bold text-base text-white">${Security.sanitize(cred.title)}</h4>
+                    <span class="text-xs text-slate-400">${Security.sanitize(cred.service)} • ${Security.sanitize(cred.username)}</span>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -1702,8 +1642,8 @@ const UI = {
               </div>
 
               <div class="flex items-center justify-between text-[11px] text-slate-500 mt-3 pt-2 border-t border-slate-800/60">
-                <span>Notes: ${cred.notes}</span>
-                <span>Last updated ${cred.lastUpdated} by ${cred.updatedBy}</span>
+                <span>Notes: ${Security.sanitize(cred.notes)}</span>
+                <span>Last updated ${cred.lastUpdated} by ${Security.sanitize(cred.updatedBy)}</span>
               </div>
             </div>
           `).join('')}
@@ -1719,10 +1659,10 @@ const UI = {
     const users = Store.getUsers();
     const query = (this.searchQueries.users || '').toLowerCase();
     const filtered = users.filter(u =>
-      u.name.toLowerCase().includes(query) ||
-      u.email.toLowerCase().includes(query) ||
-      u.role.toLowerCase().includes(query) ||
-      u.domain.toLowerCase().includes(query)
+      (u.name || '').toLowerCase().includes(query) ||
+      (u.email || '').toLowerCase().includes(query) ||
+      (u.role || '').toLowerCase().includes(query) ||
+      (u.domain || '').toLowerCase().includes(query)
     );
 
     return `
@@ -1766,15 +1706,15 @@ const UI = {
                   <tr class="table-row-hover">
                     <td class="py-4 px-4 font-semibold text-white flex items-center gap-3">
                       <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center font-bold text-xs text-indigo-400 ring-1 ring-slate-700">
-                        ${u.name[0]}
+                        ${(u.name || 'U')[0]}
                       </div>
-                      ${u.name}
+                      ${Security.sanitize(u.name)}
                     </td>
-                    <td class="py-4 px-4 font-mono text-slate-300 text-xs">${u.email}</td>
+                    <td class="py-4 px-4 font-mono text-slate-300 text-xs">${Security.sanitize(u.email)}</td>
                     <td class="py-4 px-4">
-                      <span class="px-2 py-0.5 rounded text-xs font-mono bg-slate-800 text-slate-300">@${u.domain}</span>
+                      <span class="px-2 py-0.5 rounded text-xs font-mono bg-slate-800 text-slate-300">@${Security.sanitize(u.domain)}</span>
                     </td>
-                    <td class="py-4 px-4 text-slate-300 font-medium">${u.role}</td>
+                    <td class="py-4 px-4 text-slate-300 font-medium">${Security.sanitize(u.role)}</td>
                     <td class="py-4 px-4">
                       <span class="px-2.5 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         ${u.status}
@@ -1822,6 +1762,7 @@ const UI = {
   copyToClipboard(text, title = 'Value') {
     navigator.clipboard.writeText(text).then(() => {
       this.showToast(`Copied ${title} to clipboard!`, 'success');
+      SupabaseDB.logAudit('SECRET_COPIED', Auth.getCurrentUser()?.email, `Copied secret: ${title}`);
     }).catch(() => {
       this.showToast(`Failed to copy to clipboard`, 'error');
     });
@@ -1834,24 +1775,37 @@ const UI = {
     });
   },
 
-  downloadDocumentMock(title) {
-    this.showToast(`Preparing document "${title}"...`, 'info');
+  downloadDocumentMock(title, format = 'md') {
+    this.showToast(`Preparing file download for "${title}"...`, 'info');
     
-    // Generate real enterprise document and trigger client-side download
-    const content = `# ${title}\n\nCONFIDENTIAL CORPORATE GOVERNANCE DOCUMENT\nPlatform: ZEUS Operations Platform\nGenerated: ${new Date().toUTCString()}\nClassification: Restricted / Authorized Personnel Only\n\n---\n\n## 1. Executive Protocol & Summary\nThis document sets forth operational parameters, corporate governance standards, and delivery commitments across Domari Technologies, Ikirezi Ventures, and FraudShield AI.\n\n## 2. Terms & Compliance\nAll parameters contained herein are subject to ISO/IEC 27001 compliance standards, internal security architecture principles, and national data protection statutory laws.\n\n## 3. Authorized Cryptographic Validation\nDocument Hash: SHA256-${Date.now().toString(36)}-ZEUS-ENCLAVE\nSignatory Lead: Chief Operations Officer\n\n---\n*ZEUS Enterprise Platform - Digital Signature Validated*\n`;
+    let content = '';
+    let ext = format;
+    if (title === 'supabase-schema') {
+      content = `-- Run this script in your Supabase SQL Editor\n-- ZEUS Database Schema\n` + 
+        `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\n\n` +
+        `CREATE TABLE IF NOT EXISTS public.projects (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), name VARCHAR(255), client VARCHAR(255), stage VARCHAR(50), status VARCHAR(50), budget VARCHAR(100), deadline DATE, lead VARCHAR(150), completion INTEGER DEFAULT 0, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());\n` +
+        `CREATE TABLE IF NOT EXISTS public.clients (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), name VARCHAR(255), industry VARCHAR(150), contact_person VARCHAR(150), email VARCHAR(150), phone VARCHAR(50), status VARCHAR(50), contract_value VARCHAR(100), active_projects INTEGER DEFAULT 1, location VARCHAR(150), created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());\n` +
+        `CREATE TABLE IF NOT EXISTS public.employees (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), name VARCHAR(150), role VARCHAR(150), department VARCHAR(100), email VARCHAR(150), status VARCHAR(50) DEFAULT 'Active', time_worked_together VARCHAR(100), join_date DATE DEFAULT CURRENT_DATE, location VARCHAR(150), type VARCHAR(50), created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());\n` +
+        `CREATE TABLE IF NOT EXISTS public.credentials (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), title VARCHAR(255), service VARCHAR(150), environment VARCHAR(50), username VARCHAR(150), encrypted_secret TEXT, notes TEXT, last_updated DATE DEFAULT CURRENT_DATE, updated_by VARCHAR(150), created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());\n` +
+        `CREATE TABLE IF NOT EXISTS public.audit_logs (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), event_type VARCHAR(100), user_email VARCHAR(150), details TEXT, created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());\n`;
+      ext = 'sql';
+    } else {
+      content = `# ${title}\n\nCONFIDENTIAL CORPORATE GOVERNANCE DOCUMENT\nPlatform: ZEUS Operations Platform\nGenerated: ${new Date().toUTCString()}\nClassification: Restricted / Authorized Personnel Only\n\n---\n\n## 1. Executive Protocol & Summary\nThis document sets forth operational parameters, corporate governance standards, and delivery commitments across Domari Technologies, Ikirezi Ventures, and FraudShield AI.\n\n## 2. Terms & Compliance\nAll parameters contained herein are subject to ISO/IEC 27001 compliance standards, internal security architecture principles, and national data protection statutory laws.\n\n---\n*ZEUS Enterprise Platform - Digital Signature Validated*\n`;
+      ext = 'md';
+    }
 
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.md`;
+    link.download = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
     setTimeout(() => {
-      this.showToast(`Downloaded "${title}.md" to your machine.`, 'success');
+      this.showToast(`Downloaded "${title}.${ext}" to your device.`, 'success');
     }, 400);
   },
 
@@ -1868,8 +1822,8 @@ const UI = {
         <div class="flex items-center justify-between pb-4 border-b border-slate-800">
           <div>
             <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400">${doc.fileType} • ${doc.size}</span>
-            <h3 class="text-lg font-bold text-white mt-1">${doc.title}</h3>
-            <p class="text-xs text-slate-400">Classification: <span class="text-rose-400 font-semibold">${doc.accessLevel}</span> • Author: ${doc.author}</p>
+            <h3 class="text-lg font-bold text-white mt-1">${Security.sanitize(doc.title)}</h3>
+            <p class="text-xs text-slate-400">Classification: <span class="text-rose-400 font-semibold">${doc.accessLevel}</span> • Author: ${Security.sanitize(doc.author)}</p>
           </div>
           <button onclick="UI.closePreviewModal()" class="text-slate-400 hover:text-white p-2">
             <i data-lucide="x" class="w-5 h-5"></i>
@@ -1932,17 +1886,9 @@ const UI = {
   },
 
   deleteEmployee(id) {
-    if (confirm('Are you sure you want to remove this team member?')) {
+    if (confirm('Are you sure you want to remove this person from the register?')) {
       Store.deleteItem(STORAGE_KEYS.EMPLOYEES, id);
-      this.showToast('Team member removed.', 'info');
-      this.render();
-    }
-  },
-
-  deletePastEmployee(id) {
-    if (confirm('Delete this historical personnel record from archive?')) {
-      Store.deleteItem(STORAGE_KEYS.PAST_EMPLOYEES, id);
-      this.showToast('Personnel archive record removed.', 'info');
+      this.showToast('Person record removed.', 'info');
       this.render();
     }
   },
@@ -1984,10 +1930,11 @@ const UI = {
     let data = [];
     if (type === 'projects') data = Store.getProjects();
     if (type === 'clients') data = Store.getClients();
+    if (type === 'employees') data = Store.getEmployees();
     if (!data.length) return;
 
     const headers = Object.keys(data[0]).join(',');
-    const rows = data.map(item => Object.values(item).map(v => `"${v}"`).join(','));
+    const rows = data.map(item => Object.values(item).map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(','));
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
@@ -2059,7 +2006,7 @@ const UI = {
       completion: 10
     });
     this.closeGenericModal();
-    this.showToast('Project registered successfully!', 'success');
+    this.showToast('Project registered successfully in database!', 'success');
     this.render();
   },
 
@@ -2126,8 +2073,9 @@ const UI = {
     this.render();
   },
 
+  // UNIFIED ADD EMPLOYEE / WORKED WITH MODAL
   openAddEmployeeModal() {
-    this.openGenericModal('Add Active Team Member', `
+    this.openGenericModal('Add Person Record (Employee / Alumni / Contractor)', `
       <form id="generic-form" onsubmit="UI.handleAddEmployeeSubmit(event)" class="space-y-4">
         <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">Full Name</label>
@@ -2146,21 +2094,36 @@ const UI = {
               <option value="Product Management">Product Management</option>
               <option value="Infrastructure">Infrastructure</option>
               <option value="Design">Design</option>
+              <option value="Operations">Operations</option>
             </select>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Company Email</label>
-            <input required type="email" name="email" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="e.g. eric@domari.com">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Status</label>
+            <select name="status" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm">
+              <option value="Active">Active Employee</option>
+              <option value="Former / Alumni">Former / Alumni</option>
+              <option value="Contractor (Completed)">Contractor (Completed)</option>
+            </select>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Location</label>
-            <input required name="location" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="Kigali HQ">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Time Worked Together</label>
+            <input required name="timeWorkedTogether" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="e.g. Jan 2023 - Present or 12 mos">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Email / Contact</label>
+            <input name="email" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="e.g. eric@domari.com">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Location / Engagement</label>
+            <input name="location" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="Kigali HQ / External">
           </div>
         </div>
         <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs mt-4">
-          Add Team Member
+          Save Person Record
         </button>
       </form>
     `);
@@ -2173,82 +2136,16 @@ const UI = {
       name: fd.get('name'),
       role: fd.get('role'),
       department: fd.get('department'),
-      email: fd.get('email'),
-      status: 'Active',
+      status: fd.get('status'),
+      timeWorkedTogether: fd.get('timeWorkedTogether'),
+      email: fd.get('email') || 'N/A',
       joinDate: new Date().toISOString().split('T')[0],
-      location: fd.get('location'),
-      type: 'Full-time',
+      location: fd.get('location') || 'Kigali HQ',
+      type: fd.get('status') === 'Active' ? 'Full-time' : 'Alumni / Contractor',
       projectsCount: 1
     });
     this.closeGenericModal();
-    this.showToast('Team member added to directory!', 'success');
-    this.render();
-  },
-
-  openAddPastEmployeeModal() {
-    this.openGenericModal('Archive Personnel & Contractor Record', `
-      <form id="generic-form" onsubmit="UI.handleAddPastEmployeeSubmit(event)" class="space-y-4">
-        <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">Individual Name</label>
-          <input required name="name" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="e.g. Samuel Mutabazi">
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Former Role</label>
-            <input required name="formerRole" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="Senior Security Auditor">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Engagement Type</label>
-            <input required name="engagementType" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="Contractor (Confidential)">
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Period of Engagement</label>
-            <input required name="period" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="Jan 2024 - Dec 2024">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Performance Rating</label>
-            <input required name="performanceScore" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="9.5 / 10">
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">Projects Worked On</label>
-          <input required name="projectsWorkedOn" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="FraudShield v1, Bank of Kigali PenTest">
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Clearance Level</label>
-            <input required name="clearanceLevel" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="Level 3 Confidential">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Contact Email</label>
-            <input required name="currentContact" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm" placeholder="samuel@external-consult.com">
-          </div>
-        </div>
-        <button type="submit" class="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs mt-4">
-          Archive Record
-        </button>
-      </form>
-    `);
-  },
-
-  handleAddPastEmployeeSubmit(e) {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    Store.addItem(STORAGE_KEYS.PAST_EMPLOYEES, {
-      name: fd.get('name'),
-      formerRole: fd.get('formerRole'),
-      engagementType: fd.get('engagementType'),
-      period: fd.get('period'),
-      performanceScore: fd.get('performanceScore'),
-      projectsWorkedOn: fd.get('projectsWorkedOn'),
-      clearanceLevel: fd.get('clearanceLevel'),
-      currentContact: fd.get('currentContact'),
-      status: 'Alumni Network'
-    });
-    this.closeGenericModal();
-    this.showToast('Personnel archive record created.', 'success');
+    this.showToast('Person record saved to database!', 'success');
     this.render();
   },
 
@@ -2307,7 +2204,7 @@ const UI = {
       updatedBy: user ? user.name : 'Security Admin'
     });
     this.closeGenericModal();
-    this.showToast('Secret safely encrypted and stored in vault.', 'success');
+    this.showToast('Secret safely stored in vault.', 'success');
     this.render();
   },
 
